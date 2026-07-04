@@ -190,29 +190,37 @@ func (r *Resolver) GetSuggestions(p domain.Placeholder, confirmed map[string]str
 // RenderSnippet substitutes confirmed values into the snippet body.
 func (r *Resolver) RenderSnippet(confirmed map[string]string) string {
 	body := r.Snippet.Body
-
-	// Regex replacing placeholders <@name...>
-	// Matches <@name...> and replaces with value in confirmed map.
-	// Placeholder regex matches the entire <@name...> including suffix.
-	var replaceErr error
-	placeholderRegex := regexp.MustCompile(`<@([a-zA-Z0-9_-]+)(?::(?:\?[^>]*|[^>]+))?>`)
-	res := placeholderRegex.ReplaceAllStringFunc(body, func(match string) string {
-		submatches := placeholderRegex.FindStringSubmatch(match)
-		if len(submatches) < 2 {
-			return match
-		}
+	// Replace placeholders <#name> and <#name:raw> with confirmed values.
+	re := regexp.MustCompile(`<#([a-zA-Z0-9_-]+)(:raw)?>`)
+	body = re.ReplaceAllStringFunc(body, func(m string) string {
+		submatches := re.FindStringSubmatch(m)
 		name := submatches[1]
-		val, ok := confirmed[name]
-		if ok {
+		isRaw := submatches[2] == ":raw"
+
+		val := confirmed[name]
+		if isRaw {
 			return val
 		}
-		return match // Leave unchanged if unresolved
+		return ShellQuote(val)
 	})
 
-	if replaceErr != nil {
-		return body
-	}
-	return res
+    // Replace placeholders <[@$]name> and <[@$]name:...> with either the provided value, a default, or an env var $NAME.
+    phMap := make(map[string]domain.Placeholder)
+    for _, ph := range r.Snippet.Placeholders {
+        phMap[ph.Name] = ph
+    }
+    envRe := regexp.MustCompile(`<[@$]([A-Za-z0-9_-]+)(?::(?:\?[^>]*|[^>]+))?>`)
+    body = envRe.ReplaceAllStringFunc(body, func(m string) string {
+        name := envRe.FindStringSubmatch(m)[1]
+        if val, ok := confirmed[name]; ok && strings.TrimSpace(val) != "" {
+            return val
+        }
+        if ph, ok := phMap[name]; ok && ph.IsDefault {
+            return ph.DefaultValue
+        }
+        return fmt.Sprintf("$%s", name)
+    })
+	return body
 }
 
 func listFilesAndDirs(dirsOnly bool) ([]string, error) {
