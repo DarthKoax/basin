@@ -5,3 +5,4 @@
 * Selecting a snippet to be copied will bring up a floating pane for the form.
 * Rename the app to 'Recall' remove any reference to peanutbutter or peanutclone
 * The snippet template values should take the form of an environment variable '<$CURL_URL>' instead of '<@json_body>'. If a value is not provided on input or is empty on selection. The < > are removed the the environement varible form output. 
+* There should be an option to open a markdown file in the systems default editor. On close of the editor returns to the app

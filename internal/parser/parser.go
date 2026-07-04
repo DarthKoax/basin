@@ -12,7 +12,7 @@ import (
 	"peanutclone/internal/domain"
 )
 
-var placeholderRegex = regexp.MustCompile(`<@([a-zA-Z0-9_-]+)(?::(\?[^>]*|[^>]+))?>`)
+var placeholderRegex = regexp.MustCompile(`<[@$]([a-zA-Z0-9_-]+)(?::(\?[^>]*|[^>]+))?>`)
 
 // Slugify converts a string name into a URL/id-friendly slug.
 func Slugify(s string) string {

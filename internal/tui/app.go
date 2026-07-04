@@ -636,53 +636,55 @@ func (m *AppModel) View() string {
             sb.WriteString(listContent)
         }
     case WizardMode:
-        // Render wizard overlay only (no background panels)
+	// First render the background panels (list + preview)
+	background := m.renderMainPanels()
 
-        // Build wizard content
-        p := m.wizardSnippet.Placeholders[m.wizardVarIndex]
-        var wizard strings.Builder
-        wizard.WriteString(instructionsStyle.Render(fmt.Sprintf("[Fill Template: %d/%d]  Enter: next  Shift+Tab: back  Esc: cancel", m.wizardVarIndex+1, len(m.wizardSnippet.Placeholders))) + "\n\n")
-        wizard.WriteString(headerStyle.Render("Snippet: ") + m.wizardSnippet.Name + "\n")
-        wizard.WriteString(headerStyle.Render("Variable: ") + p.Name + "\n\n")
-        wizard.WriteString(m.wizardInput.View() + "\n\n")
-        if m.wizardLoadingSuggs {
-            wizard.WriteString("  Loading suggestions...\n")
-        } else if m.wizardError != nil {
-            wizard.WriteString(fmt.Sprintf("  Warning: suggestion command error: %v\n", m.wizardError))
-        } else if len(m.wizardSuggestions) > 0 {
-            wizard.WriteString(headerStyle.Render("Suggestions:") + "\n")
-            for i, sug := range m.wizardSuggestions {
-                if i == m.wizardSugSelectedIndex {
-                    wizard.WriteString(selectedItemStyle.Render(fmt.Sprintf("  ▸ %s", sug)) + "\n")
-                } else {
-                    wizard.WriteString(normalItemStyle.Render(fmt.Sprintf("    %s", sug)) + "\n")
-                }
-            }
-        }
-        // Live preview
-        previewVals := make(map[string]string)
-        for k, v := range m.wizardConfirmed {
-            previewVals[k] = v
-        }
-        if cur := m.wizardInput.Value(); cur != "" {
-            previewVals[p.Name] = cur
-        }
-        r := resolver.NewResolver(m.config, m.wizardSnippet, domain.Frontmatter{})
-        preview := r.RenderSnippet(previewVals)
-        wizard.WriteString("\n" + headerStyle.Render("Preview:") + "\n")
-        wizard.WriteString(preview + "\n")
+	// Build wizard content
+	p := m.wizardSnippet.Placeholders[m.wizardVarIndex]
+	var wizard strings.Builder
+	wizard.WriteString(instructionsStyle.Render(fmt.Sprintf("[Fill Template: %d/%d]  Enter: next  Shift+Tab: back  Esc: cancel", m.wizardVarIndex+1, len(m.wizardSnippet.Placeholders))) + "\n\n")
+	wizard.WriteString(headerStyle.Render("Snippet: ") + m.wizardSnippet.Name + "\n")
+	wizard.WriteString(headerStyle.Render("Variable: ") + p.Name + "\n\n")
+	wizard.WriteString(m.wizardInput.View() + "\n\n")
+	if m.wizardLoadingSuggs {
+		wizard.WriteString("  Loading suggestions...\n")
+	} else if m.wizardError != nil {
+		wizard.WriteString(fmt.Sprintf("  Warning: suggestion command error: %v\n", m.wizardError))
+	} else if len(m.wizardSuggestions) > 0 {
+		wizard.WriteString(headerStyle.Render("Suggestions:") + "\n")
+		for i, sug := range m.wizardSuggestions {
+			if i == m.wizardSugSelectedIndex {
+				wizard.WriteString(selectedItemStyle.Render(fmt.Sprintf("  ▸ %s", sug)) + "\n")
+			} else {
+				wizard.WriteString(normalItemStyle.Render(fmt.Sprintf("    %s", sug)) + "\n")
+			}
+		}
+	}
+	// Live preview
+	previewVals := make(map[string]string)
+	for k, v := range m.wizardConfirmed {
+		previewVals[k] = v
+	}
+	if cur := m.wizardInput.Value(); cur != "" {
+		previewVals[p.Name] = cur
+	}
+	r := resolver.NewResolver(m.config, m.wizardSnippet, domain.Frontmatter{})
+	preview := r.RenderSnippet(previewVals)
+	wizard.WriteString("\n" + headerStyle.Render("Preview:") + "\n")
+	wizard.WriteString(preview + "\n")
 
-        // Style the floating pane
-        overlayStyle := lipgloss.NewStyle().
-            Border(lipgloss.NormalBorder()).
-            BorderForeground(lipgloss.Color("#444444")).
-            Padding(1).
-            Width(m.termWidth / 2).
-            Height(m.termHeight / 2)
-        overlay := overlayStyle.Render(wizard.String())
-        // Center the overlay
-        centered := lipgloss.Place(m.termWidth, m.termHeight, lipgloss.Center, lipgloss.Center, overlay)
-        sb.WriteString("\n" + centered)
+	// Style the floating pane
+	overlayStyle := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("#444444")).
+		Padding(1).
+		Width(m.termWidth / 2).
+		Height(m.termHeight / 2)
+	overlay := overlayStyle.Render(wizard.String())
+	// Combine background with overlay using lipgloss overlay
+
+	combined := background + "\n" + overlay
+	sb.WriteString(combined)
     }
 
     return sb.String()
