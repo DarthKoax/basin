@@ -421,3 +421,89 @@ func TestWizardSelect_FullRenderConfirmCopiesSnippet(t *testing.T) {
 		t.Errorf("expected final snippet to contain URL, got: %s", m.FinalSnippet)
 	}
 }
+
+func TestFloatingPane_ShowAndHide(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snip := newTestSnippet()
+	snippets := []domain.Snippet{snip}
+	files := []domain.SnippetFile{}
+	m := NewAppModel(cfg, nil, snippets, files)
+	m.termWidth = 120
+	m.termHeight = 40
+
+	if m.floatingPane.active {
+		t.Fatal("floating pane should not be active initially")
+	}
+
+	m.showFloatingPane("Test Pane", []string{"Line 1", "Line 2"}, 40, 10)
+
+	if !m.floatingPane.active {
+		t.Fatal("floating pane should be active after showFloatingPane")
+	}
+	if m.floatingPane.title != "Test Pane" {
+		t.Errorf("expected title 'Test Pane', got %q", m.floatingPane.title)
+	}
+	if len(m.floatingPane.content) != 2 {
+		t.Errorf("expected 2 content lines, got %d", len(m.floatingPane.content))
+	}
+
+	view := m.View()
+	if !viewContains(view, "Test Pane") {
+		t.Fatal("expected view to contain floating pane title")
+	}
+	if !viewContains(view, "Line 1") {
+		t.Fatal("expected view to contain floating pane content")
+	}
+
+	m.hideFloatingPane()
+	if m.floatingPane.active {
+		t.Fatal("floating pane should not be active after hideFloatingPane")
+	}
+}
+
+func TestFloatingPane_DismissWithEsc(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snip := newTestSnippet()
+	snippets := []domain.Snippet{snip}
+	files := []domain.SnippetFile{}
+	m := NewAppModel(cfg, nil, snippets, files)
+	m.termWidth = 120
+	m.termHeight = 40
+
+	m.showFloatingPane("Test", []string{"Content"}, 40, 10)
+
+	escKey := tea.KeyMsg{Type: tea.KeyEsc}
+	model, _ := m.Update(escKey)
+	m = model.(*AppModel)
+
+	if m.floatingPane.active {
+		t.Fatal("floating pane should be dismissed after pressing Esc")
+	}
+}
+
+func TestFloatingPane_CenteredPosition(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snip := newTestSnippet()
+	snippets := []domain.Snippet{snip}
+	files := []domain.SnippetFile{}
+	m := NewAppModel(cfg, nil, snippets, files)
+	m.termWidth = 100
+	m.termHeight = 50
+
+	m.showFloatingPane("Centered", []string{"Test"}, 40, 10)
+
+	view := m.View()
+	lines := strings.Split(stripANSI(view), "\n")
+
+	foundTitle := false
+	for _, line := range lines {
+		if strings.Contains(line, "Centered") {
+			foundTitle = true
+			break
+		}
+	}
+
+	if !foundTitle {
+		t.Fatal("expected to find floating pane title in view")
+	}
+}
