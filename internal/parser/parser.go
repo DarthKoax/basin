@@ -12,7 +12,7 @@ import (
 	"peanutclone/internal/domain"
 )
 
-var placeholderRegex = regexp.MustCompile(`<[@$]([a-zA-Z0-9_-]+)(?::(\?[^>]*|[^>]+))?>`)
+var defaultBoundaries = domain.Boundaries{Open: "<", Close: ">"}
 
 // Slugify converts a string name into a URL/id-friendly slug.
 func Slugify(s string) string {
@@ -32,6 +32,14 @@ func Slugify(s string) string {
 	}
 	res := sb.String()
 	return strings.TrimSuffix(res, "-")
+}
+
+// buildPlaceholderRegex creates a regex pattern for the given boundary characters.
+func buildPlaceholderRegex(open, close string) *regexp.Regexp {
+	openEsc := regexp.QuoteMeta(open)
+	closeEsc := regexp.QuoteMeta(close)
+	pattern := openEsc + `[@$]([a-zA-Z0-9_-]+)(?::(\?[^` + closeEsc + `]*|[^` + closeEsc + `]+))?` + closeEsc
+	return regexp.MustCompile(pattern)
 }
 
 // ParseFile parses a markdown file, reading optional frontmatter and extracting snippets.
@@ -157,7 +165,7 @@ func ParseFile(path string, rootDir string, reader io.Reader) (*domain.SnippetFi
 		bodyText := strings.Join(raw.bodyLines, "\n")
 		descText := strings.TrimSpace(strings.Join(raw.descLines, "\n"))
 
-		placeholders := extractPlaceholders(bodyText)
+		placeholders := extractPlaceholders(bodyText, snippetFile.Frontmatter.Boundaries)
 
 		slug := Slugify(raw.name)
 		id := relPath + "#" + slug
@@ -172,6 +180,7 @@ func ParseFile(path string, rootDir string, reader io.Reader) (*domain.SnippetFi
 			SourceFile:   path,
 			RelativePath: relPath,
 			Tags:         snippetFile.Frontmatter.Tags,
+			Boundaries:   snippetFile.Frontmatter.Boundaries,
 		}
 		snippetFile.Snippets = append(snippetFile.Snippets, snippet)
 	}
@@ -212,8 +221,18 @@ func DiscoverAndParse(roots []string) ([]domain.SnippetFile, error) {
 	return files, nil
 }
 
-func extractPlaceholders(body string) []domain.Placeholder {
-	matches := placeholderRegex.FindAllStringSubmatch(body, -1)
+func extractPlaceholders(body string, boundaries domain.Boundaries) []domain.Placeholder {
+	open := boundaries.Open
+	close := boundaries.Close
+	if open == "" {
+		open = defaultBoundaries.Open
+	}
+	if close == "" {
+		close = defaultBoundaries.Close
+	}
+
+	re := buildPlaceholderRegex(open, close)
+	matches := re.FindAllStringSubmatch(body, -1)
 	if len(matches) == 0 {
 		return nil
 	}
@@ -230,11 +249,24 @@ func extractPlaceholders(body string) []domain.Placeholder {
 		var cmd string
 		var isDef bool
 		var isCmd bool
+		var isSelect bool
+		var selectOptions []string
 
 		if source != "" {
 			if strings.HasPrefix(source, "?") {
-				isDef = true
-				defVal = strings.TrimPrefix(source, "?")
+				valuePart := strings.TrimPrefix(source, "?")
+				parts := strings.Split(valuePart, "|")
+				if len(parts) > 1 {
+					isDef = true
+					isSelect = true
+					defVal = parts[0]
+					for _, p := range parts {
+						selectOptions = append(selectOptions, p)
+					}
+				} else {
+					isDef = true
+					defVal = valuePart
+				}
 			} else {
 				isCmd = true
 				cmd = source
@@ -247,12 +279,14 @@ func extractPlaceholders(body string) []domain.Placeholder {
 		seen[name] = true
 
 		placeholders = append(placeholders, domain.Placeholder{
-			Name:         name,
-			Raw:          raw,
-			DefaultValue: defVal,
-			Command:      cmd,
-			IsDefault:    isDef,
-			IsCommand:    isCmd,
+			Name:          name,
+			Raw:           raw,
+			DefaultValue:  defVal,
+			Command:       cmd,
+			IsDefault:     isDef,
+			IsCommand:     isCmd,
+			IsSelect:      isSelect,
+			SelectOptions: selectOptions,
 		})
 	}
 

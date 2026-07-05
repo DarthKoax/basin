@@ -41,10 +41,25 @@ func ShellQuote(s string) string {
 }
 
 // ResolveCommandTemplate processes `<#name>` and `<#name:raw>` references in a command template.
-func ResolveCommandTemplate(template string, confirmed map[string]string) (string, error) {
+func ResolveCommandTemplate(template string, confirmed map[string]string, boundaries domain.Boundaries) (string, error) {
+	open := boundaries.Open
+	close := boundaries.Close
+	if open == "" {
+		open = "<"
+	}
+	if close == "" {
+		close = ">"
+	}
+
+	openEsc := regexp.QuoteMeta(open)
+	closeEsc := regexp.QuoteMeta(close)
+
+	pattern := `(\\)?` + openEsc + `#([a-zA-Z0-9_-]+)(:raw)?` + closeEsc
+	depRe := regexp.MustCompile(pattern)
+
 	var parseErr error
-	res := dependentRegex.ReplaceAllStringFunc(template, func(match string) string {
-		submatches := dependentRegex.FindStringSubmatch(match)
+	res := depRe.ReplaceAllStringFunc(template, func(match string) string {
+		submatches := depRe.FindStringSubmatch(match)
 		if len(submatches) < 3 {
 			return match
 		}
@@ -98,6 +113,11 @@ func (r *Resolver) GetDefaultValue(p domain.Placeholder) string {
 
 // GetSuggestions resolves static or command-backed suggestions for a placeholder.
 func (r *Resolver) GetSuggestions(p domain.Placeholder, confirmed map[string]string) ([]string, error) {
+	// Priority 0: Inline pipe-separated select options take highest precedence
+	if p.IsSelect && len(p.SelectOptions) > 0 {
+		return p.SelectOptions, nil
+	}
+
 	// Determine the source of suggestions (command or static list)
 	var commandStr string
 	var staticList []string
@@ -156,7 +176,7 @@ func (r *Resolver) GetSuggestions(p domain.Placeholder, confirmed map[string]str
 		}
 
 		// Interpolate dependent variables
-		resolvedCmd, err := ResolveCommandTemplate(commandStr, confirmed)
+		resolvedCmd, err := ResolveCommandTemplate(commandStr, confirmed, r.Snippet.Boundaries)
 		if err != nil {
 			return nil, fmt.Errorf("resolving command template: %w", err)
 		}
@@ -190,12 +210,35 @@ func (r *Resolver) GetSuggestions(p domain.Placeholder, confirmed map[string]str
 // RenderSnippet substitutes confirmed values into the snippet body.
 func (r *Resolver) RenderSnippet(confirmed map[string]string) string {
 	body := r.Snippet.Body
+
+	open := r.Snippet.Boundaries.Open
+	close := r.Snippet.Boundaries.Close
+	if open == "" {
+		open = "<"
+	}
+	if close == "" {
+		close = ">"
+	}
+
+	openEsc := regexp.QuoteMeta(open)
+	closeEsc := regexp.QuoteMeta(close)
+
 	// Replace placeholders <#name> and <#name:raw> with confirmed values.
-	re := regexp.MustCompile(`<#([a-zA-Z0-9_-]+)(:raw)?>`)
-	body = re.ReplaceAllStringFunc(body, func(m string) string {
-		submatches := re.FindStringSubmatch(m)
-		name := submatches[1]
-		isRaw := submatches[2] == ":raw"
+	depPattern := `(\\)?` + openEsc + `#([a-zA-Z0-9_-]+)(:raw)?` + closeEsc
+	depRe := regexp.MustCompile(depPattern)
+	body = depRe.ReplaceAllStringFunc(body, func(match string) string {
+		submatches := depRe.FindStringSubmatch(match)
+		if len(submatches) < 3 {
+			return match
+		}
+
+		escaped := submatches[1] != ""
+		name := submatches[2]
+		isRaw := submatches[3] == ":raw"
+
+		if escaped {
+			return match[1:]
+		}
 
 		val := confirmed[name]
 		if isRaw {
@@ -204,22 +247,23 @@ func (r *Resolver) RenderSnippet(confirmed map[string]string) string {
 		return ShellQuote(val)
 	})
 
-    // Replace placeholders <[@$]name> and <[@$]name:...> with either the provided value, a default, or an env var $NAME.
-    phMap := make(map[string]domain.Placeholder)
-    for _, ph := range r.Snippet.Placeholders {
-        phMap[ph.Name] = ph
-    }
-    envRe := regexp.MustCompile(`<[@$]([A-Za-z0-9_-]+)(?::(?:\?[^>]*|[^>]+))?>`)
-    body = envRe.ReplaceAllStringFunc(body, func(m string) string {
-        name := envRe.FindStringSubmatch(m)[1]
-        if val, ok := confirmed[name]; ok && strings.TrimSpace(val) != "" {
-            return val
-        }
-        if ph, ok := phMap[name]; ok && ph.IsDefault {
-            return ph.DefaultValue
-        }
-        return fmt.Sprintf("$%s", name)
-    })
+	// Replace placeholders <[@$]name> and <[@$]name:...> with either the provided value, a default, or an env var $NAME.
+	phMap := make(map[string]domain.Placeholder)
+	for _, ph := range r.Snippet.Placeholders {
+		phMap[ph.Name] = ph
+	}
+	envPattern := openEsc + `[@$]([A-Za-z0-9_-]+)(?::(?:\?[^` + closeEsc + `]*|[^` + closeEsc + `]+))?` + closeEsc
+	envRe := regexp.MustCompile(envPattern)
+	body = envRe.ReplaceAllStringFunc(body, func(m string) string {
+		name := envRe.FindStringSubmatch(m)[1]
+		if val, ok := confirmed[name]; ok && strings.TrimSpace(val) != "" {
+			return val
+		}
+		if ph, ok := phMap[name]; ok && ph.IsDefault {
+			return ph.DefaultValue
+		}
+		return fmt.Sprintf("$%s", name)
+	})
 	return body
 }
 
