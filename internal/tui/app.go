@@ -24,6 +24,7 @@ const (
 	BrowserMode
 	TagsMode
 	WizardMode
+	CommandPaletteMode
 )
 
 // Msg types
@@ -39,6 +40,12 @@ type browserItem struct {
 	isSnip bool
 	snip   domain.Snippet
 	path   string // Virtual path structure (e.g. "nested/docker")
+}
+
+type command struct {
+	name        string
+	description string
+	action      func() tea.Cmd
 }
 
 // AppModel holds the state for the Bubble Tea application.
@@ -66,16 +73,22 @@ type AppModel struct {
 	browserItems         []browserItem
 	browserSelectedIndex int
 	browserScrollOffset  int
+	browserFocusedPanel  int // 0=list, 1=preview
+	browserPreviewScroll int
 
 	// Tags Mode state
 	tags                     []string
 	tagCounts                map[string]int
 	tagsSelectedIndex        int
 	tagsScrollOffset         int
+	tagsFocusedPanel         int // 0=list, 1=preview
+	tagsPreviewScroll        int
 	selectedTag              string
 	tagSnippets              []domain.Snippet
 	tagSnippetsSelectedIndex int
 	tagSnippetsScrollOffset  int
+	tagSnippetsFocusedPanel  int // 0=list, 1=preview
+	tagSnippetsPreviewScroll int
 	inTagSnippets            bool
 
 	// Wizard Mode state
@@ -88,6 +101,12 @@ type AppModel struct {
 	wizardSugScrollOffset  int
 	wizardLoadingSuggs     bool
 	wizardError            error
+
+	// Command Palette state
+	commandPaletteQuery    textinput.Model
+	commandPaletteSelected int
+	commandPaletteCommands []command
+	commandPalettePrevMode tuiMode
 
 	// Preview scroll offsets
 	finderPreviewScroll int
@@ -103,18 +122,25 @@ func NewAppModel(cfg *config.Config, snippets []domain.Snippet, files []domain.S
 	wInput := textinput.New()
 	wInput.Focus()
 
+	cpInput := textinput.New()
+	cpInput.Placeholder = "Type a command..."
+	cpInput.Focus()
+
 	m := &AppModel{
-		mode:            FinderMode,
-		config:          cfg,
-		allSnippets:     snippets,
-		snippetFiles:    files,
-		finderQuery:     ti,
-		wizardInput:     wInput,
-		wizardConfirmed: make(map[string]string),
+		mode:                   FinderMode,
+		config:                 cfg,
+		allSnippets:            snippets,
+		snippetFiles:           files,
+		finderQuery:            ti,
+		wizardInput:            wInput,
+		wizardConfirmed:        make(map[string]string),
+		commandPaletteQuery:    cpInput,
+		commandPaletteSelected: 0,
 	}
 
 	m.initBrowser()
 	m.initTags()
+	m.initCommands()
 
 	return m
 }
@@ -237,11 +263,80 @@ func (m *AppModel) filterSnippetsByTag(tag string) {
 	m.tagSnippetsSelectedIndex = 0
 }
 
+func (m *AppModel) initCommands() {
+	m.commandPaletteCommands = []command{
+		{
+			name:        "Finder Mode",
+			description: "Switch to fuzzy finder mode",
+			action: func() tea.Cmd {
+				m.mode = FinderMode
+				m.finderFocusedPanel = 0
+				m.finderQuery.Focus()
+				return nil
+			},
+		},
+		{
+			name:        "Browser Mode",
+			description: "Switch to directory browser mode",
+			action: func() tea.Cmd {
+				m.mode = BrowserMode
+				m.browserFocusedPanel = 0
+				return nil
+			},
+		},
+		{
+			name:        "Tags Mode",
+			description: "Switch to tags dashboard mode",
+			action: func() tea.Cmd {
+				m.mode = TagsMode
+				m.tagsFocusedPanel = 0
+				m.inTagSnippets = false
+				return nil
+			},
+		},
+		{
+			name:        "Start Wizard",
+			description: "Start the variable wizard for selected snippet",
+			action: func() tea.Cmd {
+				var snip domain.Snippet
+				switch m.commandPalettePrevMode {
+				case FinderMode:
+					filtered := search.FilterSnippets(m.allSnippets, m.finderQuery.Value())
+					if len(filtered) > 0 && m.finderSelectedIndex < len(filtered) {
+						snip = filtered[m.finderSelectedIndex]
+					}
+				case BrowserMode:
+					if len(m.browserItems) > 0 && m.browserSelectedIndex < len(m.browserItems) {
+						item := m.browserItems[m.browserSelectedIndex]
+						if item.isSnip {
+							snip = item.snip
+						}
+					}
+				case TagsMode:
+					if m.inTagSnippets && len(m.tagSnippets) > 0 && m.tagSnippetsSelectedIndex < len(m.tagSnippets) {
+						snip = m.tagSnippets[m.tagSnippetsSelectedIndex]
+					}
+				}
+				if snip.Name != "" {
+					return m.selectSnippet(snip)
+				}
+				return nil
+			},
+		},
+		{
+			name:        "Quit",
+			description: "Exit the application",
+			action: func() tea.Cmd {
+				return tea.Quit
+			},
+		},
+	}
+}
+
 // Transition to wizard or output
 
 func (m *AppModel) selectSnippet(snip domain.Snippet) tea.Cmd {
 	if len(snip.Placeholders) == 0 {
-		// Zero-variable snippet, finalise immediately
 		return m.finalizeSnippet(snip.Body)
 	}
 
@@ -249,6 +344,7 @@ func (m *AppModel) selectSnippet(snip domain.Snippet) tea.Cmd {
 	m.wizardSnippet = snip
 	m.wizardVarIndex = 0
 	m.wizardConfirmed = make(map[string]string)
+	m.wizardInput.Focus()
 	return m.setupWizardForCurrentVar()
 }
 
@@ -340,10 +436,22 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+d":
 			return m, tea.Quit
 		case "ctrl+t":
-			if m.mode != WizardMode {
+			if m.mode != WizardMode && m.mode != CommandPaletteMode {
 				m.mode = (m.mode + 1) % 3
 				m.finderFocusedPanel = 0
 				m.finderQuery.Focus()
+				m.browserFocusedPanel = 0
+				m.tagsFocusedPanel = 0
+				m.tagSnippetsFocusedPanel = 0
+				return m, nil
+			}
+		case "ctrl+p":
+			if m.mode != CommandPaletteMode {
+				m.commandPalettePrevMode = m.mode
+				m.mode = CommandPaletteMode
+				m.commandPaletteQuery.SetValue("")
+				m.commandPaletteSelected = 0
+				m.commandPaletteQuery.Focus()
 				return m, nil
 			}
 		}
@@ -371,6 +479,8 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateTags(msg)
 	case WizardMode:
 		return m.updateWizard(msg)
+	case CommandPaletteMode:
+		return m.updateCommandPalette(msg)
 	}
 
 	return m, nil
@@ -444,31 +554,67 @@ func (m *AppModel) updateFinder(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *AppModel) updateBrowser(msg tea.Msg) (tea.Model, tea.Cmd) {
-	availH := m.termHeight - 2
-	if availH < 1 {
-		availH = 1
-	}
+	_, _, panelHeight := m.panelDims()
+	visibleH := m.innerContentHeight(panelHeight)
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		keyStr := msg.String()
+
+		if m.browserFocusedPanel == 1 {
+			switch keyStr {
+			case "up", "ctrl+k":
+				m.browserPreviewScroll--
+				if m.browserPreviewScroll < 0 {
+					m.browserPreviewScroll = 0
+				}
+			case "down", "ctrl+j":
+				m.browserPreviewScroll++
+			case "ctrl+u":
+				m.browserPreviewScroll -= visibleH / 2
+				if m.browserPreviewScroll < 0 {
+					m.browserPreviewScroll = 0
+				}
+			case "left", "esc", "tab":
+				m.browserFocusedPanel = 0
+			case "ctrl+c":
+				if len(m.browserItems) > 0 && m.browserSelectedIndex < len(m.browserItems) {
+					item := m.browserItems[m.browserSelectedIndex]
+					if item.isSnip {
+						return m, m.selectSnippet(item.snip)
+					}
+				}
+			}
+			return m, nil
+		}
+
 		switch keyStr {
 		case "up", "ctrl+k":
 			if m.browserSelectedIndex > 0 {
 				m.browserSelectedIndex--
+				m.browserPreviewScroll = 0
 			}
 		case "down", "ctrl+j":
 			if m.browserSelectedIndex < len(m.browserItems)-1 {
 				m.browserSelectedIndex++
+				m.browserPreviewScroll = 0
 			}
-		case "enter":
+		case "enter", "tab":
 			if len(m.browserItems) > 0 && m.browserSelectedIndex < len(m.browserItems) {
 				item := m.browserItems[m.browserSelectedIndex]
 				if item.isDir || item.isFile {
 					m.browserPath = item.path
 					m.initBrowser()
 					m.browserScrollOffset = 0
+					m.browserPreviewScroll = 0
 				} else if item.isSnip {
+					return m, m.selectSnippet(item.snip)
+				}
+			}
+		case "ctrl+c":
+			if len(m.browserItems) > 0 && m.browserSelectedIndex < len(m.browserItems) {
+				item := m.browserItems[m.browserSelectedIndex]
+				if item.isSnip {
 					return m, m.selectSnippet(item.snip)
 				}
 			}
@@ -482,62 +628,115 @@ func (m *AppModel) updateBrowser(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.initBrowser()
 				m.browserScrollOffset = 0
+				m.browserPreviewScroll = 0
 			}
 		}
 	}
 
-	m.browserScrollOffset = clampScroll(m.browserSelectedIndex, m.browserScrollOffset, availH)
+	m.browserScrollOffset = clampScroll(m.browserSelectedIndex, m.browserScrollOffset, visibleH)
 
 	return m, nil
 }
 
 func (m *AppModel) updateTags(msg tea.Msg) (tea.Model, tea.Cmd) {
-	availH := m.termHeight - 2
-	if availH < 1 {
-		availH = 1
-	}
+	_, _, panelHeight := m.panelDims()
+	visibleH := m.innerContentHeight(panelHeight)
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		keyStr := msg.String()
 		if m.inTagSnippets {
+			if m.tagSnippetsFocusedPanel == 1 {
+				switch keyStr {
+				case "up", "ctrl+k":
+					m.tagSnippetsPreviewScroll--
+					if m.tagSnippetsPreviewScroll < 0 {
+						m.tagSnippetsPreviewScroll = 0
+					}
+				case "down", "ctrl+j":
+					m.tagSnippetsPreviewScroll++
+				case "ctrl+u":
+					m.tagSnippetsPreviewScroll -= visibleH / 2
+					if m.tagSnippetsPreviewScroll < 0 {
+						m.tagSnippetsPreviewScroll = 0
+					}
+				case "left", "esc", "tab":
+					m.tagSnippetsFocusedPanel = 0
+				case "ctrl+c":
+					if len(m.tagSnippets) > 0 && m.tagSnippetsSelectedIndex < len(m.tagSnippets) {
+						return m, m.selectSnippet(m.tagSnippets[m.tagSnippetsSelectedIndex])
+					}
+				}
+				return m, nil
+			}
+
 			switch keyStr {
 			case "up", "ctrl+k":
 				if m.tagSnippetsSelectedIndex > 0 {
 					m.tagSnippetsSelectedIndex--
+					m.tagSnippetsPreviewScroll = 0
 				}
 			case "down", "ctrl+j":
 				if m.tagSnippetsSelectedIndex < len(m.tagSnippets)-1 {
 					m.tagSnippetsSelectedIndex++
+					m.tagSnippetsPreviewScroll = 0
 				}
-			case "enter":
+			case "enter", "tab":
+				if len(m.tagSnippets) > 0 && m.tagSnippetsSelectedIndex < len(m.tagSnippets) {
+					return m, m.selectSnippet(m.tagSnippets[m.tagSnippetsSelectedIndex])
+				}
+			case "ctrl+c":
 				if len(m.tagSnippets) > 0 && m.tagSnippetsSelectedIndex < len(m.tagSnippets) {
 					return m, m.selectSnippet(m.tagSnippets[m.tagSnippetsSelectedIndex])
 				}
 			case "esc", "backspace":
 				m.inTagSnippets = false
 				m.tagSnippetsScrollOffset = 0
+				m.tagSnippetsPreviewScroll = 0
 			}
-			m.tagSnippetsScrollOffset = clampScroll(m.tagSnippetsSelectedIndex, m.tagSnippetsScrollOffset, availH)
+			m.tagSnippetsScrollOffset = clampScroll(m.tagSnippetsSelectedIndex, m.tagSnippetsScrollOffset, visibleH)
 		} else {
+			if m.tagsFocusedPanel == 1 {
+				switch keyStr {
+				case "up", "ctrl+k":
+					m.tagsPreviewScroll--
+					if m.tagsPreviewScroll < 0 {
+						m.tagsPreviewScroll = 0
+					}
+				case "down", "ctrl+j":
+					m.tagsPreviewScroll++
+				case "ctrl+u":
+					m.tagsPreviewScroll -= visibleH / 2
+					if m.tagsPreviewScroll < 0 {
+						m.tagsPreviewScroll = 0
+					}
+				case "left", "esc", "tab":
+					m.tagsFocusedPanel = 0
+				}
+				return m, nil
+			}
+
 			switch keyStr {
 			case "up", "ctrl+k":
 				if m.tagsSelectedIndex > 0 {
 					m.tagsSelectedIndex--
+					m.tagsPreviewScroll = 0
 				}
 			case "down", "ctrl+j":
 				if m.tagsSelectedIndex < len(m.tags)-1 {
 					m.tagsSelectedIndex++
+					m.tagsPreviewScroll = 0
 				}
-			case "enter":
+			case "enter", "tab":
 				if len(m.tags) > 0 && m.tagsSelectedIndex < len(m.tags) {
 					m.selectedTag = m.tags[m.tagsSelectedIndex]
 					m.filterSnippetsByTag(m.selectedTag)
 					m.inTagSnippets = true
 					m.tagSnippetsScrollOffset = 0
+					m.tagSnippetsPreviewScroll = 0
 				}
 			}
-			m.tagsScrollOffset = clampScroll(m.tagsSelectedIndex, m.tagsScrollOffset, availH)
+			m.tagsScrollOffset = clampScroll(m.tagsSelectedIndex, m.tagsScrollOffset, visibleH)
 		}
 	}
 	return m, nil
@@ -568,8 +767,6 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.wizardPreviewScroll < 0 {
 				m.wizardPreviewScroll = 0
 			}
-		case "ctrl+d":
-			m.wizardPreviewScroll += visibleH / 2
 		case "enter", "tab":
 			p := m.wizardSnippet.Placeholders[m.wizardVarIndex]
 			val := m.wizardInput.Value()
@@ -599,13 +796,63 @@ func (m *AppModel) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	sugVisibleH := visibleH / 3
-	if sugVisibleH < 3 {
-		sugVisibleH = 3
+	return m, cmd
+}
+
+func (m *AppModel) updateCommandPalette(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	filtered := m.getFilteredCommands()
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		keyStr := msg.String()
+		switch keyStr {
+		case "up", "ctrl+k":
+			if m.commandPaletteSelected > 0 {
+				m.commandPaletteSelected--
+			}
+		case "down", "ctrl+j":
+			if m.commandPaletteSelected < len(filtered)-1 {
+				m.commandPaletteSelected++
+			}
+		case "enter":
+			if len(filtered) > 0 && m.commandPaletteSelected < len(filtered) {
+				action := filtered[m.commandPaletteSelected].action
+				return m, action()
+			}
+		case "esc":
+			m.mode = m.commandPalettePrevMode
+			switch m.mode {
+			case FinderMode:
+				m.finderQuery.Focus()
+			case BrowserMode:
+			case TagsMode:
+			}
+			return m, nil
+		default:
+			m.commandPaletteQuery, cmd = m.commandPaletteQuery.Update(msg)
+			m.commandPaletteSelected = 0
+		}
 	}
-	m.wizardSugScrollOffset = clampScroll(m.wizardSugSelectedIndex, m.wizardSugScrollOffset, sugVisibleH)
 
 	return m, cmd
+}
+
+func (m *AppModel) getFilteredCommands() []command {
+	query := strings.ToLower(m.commandPaletteQuery.Value())
+	if query == "" {
+		return m.commandPaletteCommands
+	}
+
+	var filtered []command
+	for _, cmd := range m.commandPaletteCommands {
+		if strings.Contains(strings.ToLower(cmd.name), query) ||
+			strings.Contains(strings.ToLower(cmd.description), query) {
+			filtered = append(filtered, cmd)
+		}
+	}
+	return filtered
 }
 
 // Rendering Views
@@ -710,6 +957,49 @@ func clipLines(lines []string, offset, maxLines int) []string {
 	return lines[offset:end]
 }
 
+func renderScrollbar(totalLines, scrollOffset, visibleHeight, panelHeight int) string {
+	if totalLines <= visibleHeight {
+		return ""
+	}
+
+	innerH := panelHeight - 4
+	if innerH < 1 {
+		innerH = 1
+	}
+
+	thumbSize := (visibleHeight * innerH) / totalLines
+	if thumbSize < 1 {
+		thumbSize = 1
+	}
+
+	maxScroll := totalLines - visibleHeight
+	if maxScroll <= 0 {
+		return ""
+	}
+
+	thumbPos := (scrollOffset * (innerH - thumbSize)) / maxScroll
+	if thumbPos < 0 {
+		thumbPos = 0
+	}
+	if thumbPos+thumbSize > innerH {
+		thumbPos = innerH - thumbSize
+	}
+
+	var sb strings.Builder
+	for i := 0; i < innerH; i++ {
+		if i >= thumbPos && i < thumbPos+thumbSize {
+			sb.WriteString("█")
+		} else {
+			sb.WriteString("░")
+		}
+		if i < innerH-1 {
+			sb.WriteString("\n")
+		}
+	}
+
+	return sb.String()
+}
+
 func (m *AppModel) View() string {
 	if m.Done {
 		return fmt.Sprintf("Snippet copied to clipboard!\n\n%s\n", m.FinalSnippet)
@@ -717,143 +1007,139 @@ func (m *AppModel) View() string {
 
 	var sb strings.Builder
 
-	// Render header title
+	header := m.renderHeader()
+	footer := m.renderFooter()
+
+	sb.WriteString(header)
+
+	switch m.mode {
+	case FinderMode:
+		sb.WriteString(m.renderMainPanels())
+	case BrowserMode:
+		sb.WriteString(m.renderBrowserPanels())
+	case TagsMode:
+		sb.WriteString(m.renderTagsPanels())
+	case WizardMode:
+		sb.WriteString(m.renderMainPanels())
+	case CommandPaletteMode:
+		sb.WriteString(m.renderCommandPalette())
+	}
+
+	sb.WriteString(footer)
+
+	return sb.String()
+}
+
+func (m *AppModel) renderHeader() string {
+	var sb strings.Builder
+
 	sb.WriteString(titleStyle.Render("PEANUTCLONE") + " ")
 
 	switch m.mode {
 	case FinderMode:
-		if m.finderFocusedPanel == 0 {
-			sb.WriteString(instructionsStyle.Render("[Ctrl+T: mode]  Tab/Enter: focus preview  Ctrl+C: wizard  Ctrl+D: quit") + "\n")
-		} else {
-			sb.WriteString(instructionsStyle.Render("[Ctrl+T: mode]  Tab/Esc/Left: back to list  Ctrl+C: wizard  Ctrl+D: quit  ↑↓: scroll") + "\n")
-		}
+		sb.WriteString(titleStyle.Render("Fuzzyfinder") + "\n")
 		sb.WriteString(m.finderQuery.View() + "\n")
-		sb.WriteString(m.renderMainPanels())
 	case BrowserMode:
-		sb.WriteString(instructionsStyle.Render(fmt.Sprintf("[Browser: /%s]  Ctrl+T: mode  Enter: open/pick  Esc: up", m.browserPath)) + "\n\n")
-
-		var listLines []string
-		for i, item := range m.browserItems {
-			prefix := "  "
-			if i == m.browserSelectedIndex {
-				prefix = "▸ "
-			}
-
-			label := item.name
-			if item.isDir {
-				label = "📁 " + label + "/"
-			} else if item.isFile {
-				label = "📄 " + label
-			} else if item.isSnip {
-				label = "⚡ " + label
-			}
-
-			if i == m.browserSelectedIndex {
-				listLines = append(listLines, selectedItemStyle.Render(prefix+label))
-			} else {
-				listLines = append(listLines, normalItemStyle.Render(prefix+label))
-			}
-		}
-
-		availH := m.termHeight - 2
-		if availH < 1 {
-			availH = 1
-		}
-		visibleLines := clipLines(listLines, m.browserScrollOffset, availH)
-		listContent := strings.Join(visibleLines, "\n")
-		if listContent == "" {
-			listContent = "  Empty directory."
-		}
-		sb.WriteString(listContent)
+		sb.WriteString(titleStyle.Render(fmt.Sprintf("Browser: /%s", m.browserPath)) + "\n")
 	case TagsMode:
-		availH := m.termHeight - 2
-		if availH < 1 {
-			availH = 1
-		}
-
 		if m.inTagSnippets {
-			sb.WriteString(instructionsStyle.Render(fmt.Sprintf("[Tag: %s]  Enter: pick  Esc: back", m.selectedTag)) + "\n\n")
-
-			var listLines []string
-			for i, snip := range m.tagSnippets {
-				label := fmt.Sprintf("  %s (%s)", snip.Name, snip.RelativePath)
-				if i == m.tagSnippetsSelectedIndex {
-					listLines = append(listLines, selectedItemStyle.Render("▸"+label[1:]))
-				} else {
-					listLines = append(listLines, normalItemStyle.Render(label))
-				}
-			}
-			visibleLines := clipLines(listLines, m.tagSnippetsScrollOffset, availH)
-			listContent := strings.Join(visibleLines, "\n")
-			sb.WriteString(listContent)
+			sb.WriteString(titleStyle.Render(fmt.Sprintf("Tag: %s", m.selectedTag)) + "\n")
 		} else {
-			sb.WriteString(instructionsStyle.Render("[Tags Dashboard]  Ctrl+T: mode  Enter: open") + "\n\n")
-
-			var listLines []string
-			for i, tag := range m.tags {
-				count := m.tagCounts[tag]
-				label := fmt.Sprintf("  #%s (%d)", tag, count)
-				if i == m.tagsSelectedIndex {
-					listLines = append(listLines, selectedItemStyle.Render("▸"+label[1:]))
-				} else {
-					listLines = append(listLines, normalItemStyle.Render(label))
-				}
-			}
-			visibleLines := clipLines(listLines, m.tagsScrollOffset, availH)
-			listContent := strings.Join(visibleLines, "\n")
-			sb.WriteString(listContent)
+			sb.WriteString(titleStyle.Render("Tags") + "\n")
 		}
 	case WizardMode:
-		sb.WriteString(instructionsStyle.Render("[Ctrl+T: mode]  Enter: next var  Shift+Tab: back  Esc: cancel") + "\n")
-		sb.WriteString(m.finderQuery.View() + "\n")
+		sb.WriteString(titleStyle.Render("Form") + "\n")
+		sb.WriteString(m.renderWizardBar() + "\n")
+	case CommandPaletteMode:
+		sb.WriteString(titleStyle.Render("Command Palette") + "\n")
+		sb.WriteString(m.commandPaletteQuery.View() + "\n")
+	}
 
-		wizardContent := m.renderWizardContent()
+	return sb.String()
+}
 
-		wizardWidth, previewWidth, panelHeight := m.panelDims()
-		innerH := m.innerContentHeight(panelHeight)
+func (m *AppModel) renderFooter() string {
+	var instructions string
 
-		rendered := m.renderWizardPreview()
-		previewLines := strings.Split(rendered, "\n")
-
-		maxPreviewScroll := len(previewLines) - innerH
-		if maxPreviewScroll < 0 {
-			maxPreviewScroll = 0
+	switch m.mode {
+	case FinderMode:
+		if m.finderFocusedPanel == 0 {
+			instructions = "Enter: wizard  Tab: focus preview  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+		} else {
+			instructions = "Tab/Esc/Left: back to list  Ctrl+C: wizard  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
 		}
-		if m.wizardPreviewScroll > maxPreviewScroll {
-			m.wizardPreviewScroll = maxPreviewScroll
+	case BrowserMode:
+		if m.browserFocusedPanel == 0 {
+			instructions = "Enter: open/wizard  Ctrl+C: wizard  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+		} else {
+			instructions = "Tab/Esc/Left: back to list  Ctrl+C: wizard  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
 		}
-		visiblePreviewLines := clipLines(previewLines, m.wizardPreviewScroll, innerH)
-		previewContent := strings.Join(visiblePreviewLines, "\n")
-
-		wizardPanelStyle := lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(lipgloss.Color("#444444")).
-			Padding(1).
-			Width(wizardWidth).
-			Height(panelHeight)
-
-		wizardPanel := wizardPanelStyle.Render(wizardContent)
-
-		previewPanelStyle := lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(lipgloss.Color("#444444")).
-			Padding(1).
-			Width(previewWidth).
-			Height(panelHeight)
-
-		previewPanel := previewPanelStyle.Render(previewContent)
-
-		switch m.config.Panel.Position {
-		case "left":
-			sb.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, wizardPanel, "│", previewPanel))
-		case "right":
-			sb.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, previewPanel, "│", wizardPanel))
-		case "bottom":
-			sb.WriteString(m.renderMainPanels())
-			sb.WriteString(wizardPanel)
-		default:
-			sb.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, wizardPanel, "│", previewPanel))
+	case TagsMode:
+		if m.inTagSnippets {
+			if m.tagSnippetsFocusedPanel == 0 {
+				instructions = "Enter: wizard  Ctrl+C: wizard  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+			} else {
+				instructions = "Tab/Esc/Left: back to list  Ctrl+C: wizard  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+			}
+		} else {
+			if m.tagsFocusedPanel == 0 {
+				instructions = "Enter: open  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+			} else {
+				instructions = "Tab/Esc/Left: back to list  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+			}
 		}
+	case WizardMode:
+		instructions = "Enter/Tab: next  Shift+Tab: back  Esc: cancel  Ctrl+D: quit"
+	case CommandPaletteMode:
+		instructions = "Enter: execute  Esc: cancel  ↑↓: navigate"
+	}
+
+	return instructionsStyle.Render(instructions) + "\n"
+}
+
+func (m *AppModel) renderCommandPalette() string {
+	filtered := m.getFilteredCommands()
+
+	var sb strings.Builder
+	sb.WriteString("\n")
+
+	if len(filtered) == 0 {
+		sb.WriteString("  No commands found.\n")
+		return sb.String()
+	}
+
+	maxVisible := 10
+	if len(filtered) < maxVisible {
+		maxVisible = len(filtered)
+	}
+
+	start := m.commandPaletteSelected - maxVisible/2
+	if start < 0 {
+		start = 0
+	}
+	end := start + maxVisible
+	if end > len(filtered) {
+		end = len(filtered)
+		start = end - maxVisible
+		if start < 0 {
+			start = 0
+		}
+	}
+
+	for i := start; i < end; i++ {
+		cmd := filtered[i]
+		if i == m.commandPaletteSelected {
+			sb.WriteString(selectedItemStyle.Render("▸ "))
+			sb.WriteString(selectedItemStyle.Render(cmd.name))
+			sb.WriteString("  ")
+			sb.WriteString(instructionsStyle.Render(cmd.description))
+		} else {
+			sb.WriteString("  ")
+			sb.WriteString(normalItemStyle.Render(cmd.name))
+			sb.WriteString("  ")
+			sb.WriteString(instructionsStyle.Render(cmd.description))
+		}
+		sb.WriteString("\n")
 	}
 
 	return sb.String()
@@ -884,47 +1170,62 @@ func (m *AppModel) renderSnippetPreview(snip domain.Snippet) string {
 	return renderedMD
 }
 
-// renderWizardContent builds the wizard panel inner content.
-func (m *AppModel) renderWizardContent() string {
+// renderWizardBar builds a compact single-line wizard form for the header.
+func (m *AppModel) renderWizardBar() string {
 	p := m.wizardSnippet.Placeholders[m.wizardVarIndex]
+	var bar strings.Builder
 
-	_, _, panelHeight := m.panelDims()
-	innerH := m.innerContentHeight(panelHeight)
+	bar.WriteString(headerStyle.Render(fmt.Sprintf("[%d/%d]", m.wizardVarIndex+1, len(m.wizardSnippet.Placeholders))))
+	bar.WriteString(" ")
+	bar.WriteString(m.wizardSnippet.Name)
+	bar.WriteString(" > ")
+	bar.WriteString(headerStyle.Render(p.Name))
+	bar.WriteString(": ")
+	bar.WriteString(m.wizardInput.View())
 
-	var wizard strings.Builder
-	wizard.WriteString(instructionsStyle.Render(fmt.Sprintf("[Fill Template: %d/%d]  Enter: next  Shift+Tab: back  Esc: cancel", m.wizardVarIndex+1, len(m.wizardSnippet.Placeholders))) + "\n\n")
-	wizard.WriteString(headerStyle.Render("Snippet: ") + m.wizardSnippet.Name + "\n")
-	wizard.WriteString(headerStyle.Render("Variable: ") + p.Name + "\n\n")
-	wizard.WriteString(m.wizardInput.View() + "\n\n")
 	if m.wizardLoadingSuggs {
-		wizard.WriteString("  Loading suggestions...\n")
+		bar.WriteString("  Loading...")
 	} else if m.wizardError != nil {
-		wizard.WriteString(fmt.Sprintf("  Warning: suggestion command error: %v\n", m.wizardError))
+		bar.WriteString(fmt.Sprintf("  Error: %v", m.wizardError))
 	} else if len(m.wizardSuggestions) > 0 {
-		wizard.WriteString(headerStyle.Render("Suggestions:") + "\n")
+		bar.WriteString("  ")
+		bar.WriteString(headerStyle.Render("suggestions:"))
+		bar.WriteString(" ")
 
-		var sugLines []string
-		for i, sug := range m.wizardSuggestions {
-			if i == m.wizardSugSelectedIndex {
-				sugLines = append(sugLines, selectedItemStyle.Render(fmt.Sprintf("  ▸ %s", sug)))
-			} else {
-				sugLines = append(sugLines, normalItemStyle.Render(fmt.Sprintf("    %s", sug)))
+		maxShow := 5
+		start := m.wizardSugSelectedIndex - maxShow/2
+		if start < 0 {
+			start = 0
+		}
+		end := start + maxShow
+		if end > len(m.wizardSuggestions) {
+			end = len(m.wizardSuggestions)
+			start = end - maxShow
+			if start < 0 {
+				start = 0
 			}
 		}
-		sugVisibleH := innerH / 3
-		if sugVisibleH < 3 {
-			sugVisibleH = 3
+
+		if start > 0 {
+			bar.WriteString("... ")
 		}
-		visibleSugs := clipLines(sugLines, m.wizardSugScrollOffset, sugVisibleH)
-		for _, line := range visibleSugs {
-			wizard.WriteString(line + "\n")
+		for i := start; i < end; i++ {
+			sug := m.wizardSuggestions[i]
+			if i == m.wizardSugSelectedIndex {
+				bar.WriteString(selectedItemStyle.Render("[" + sug + "]"))
+			} else {
+				bar.WriteString(sug)
+			}
+			if i < end-1 {
+				bar.WriteString(" ")
+			}
+		}
+		if end < len(m.wizardSuggestions) {
+			bar.WriteString(" ...")
 		}
 	}
 
-	content := wizard.String()
-	contentLines := strings.Split(content, "\n")
-	visibleLines := clipLines(contentLines, 0, innerH)
-	return strings.Join(visibleLines, "\n")
+	return bar.String()
 }
 
 func (m *AppModel) renderWizardPreview() string {
@@ -987,8 +1288,26 @@ func (m *AppModel) renderMainPanels() string {
 		listContent = "  No matches found."
 	}
 
+	leftScrollbar := renderScrollbar(len(listLines), m.finderScrollOffset, innerH, panelHeight)
+
 	previewContent := "No snippet selected."
-	if len(filtered) > 0 && m.finderSelectedIndex < len(filtered) {
+	var previewScrollbar string
+	if m.mode == WizardMode {
+		rendered := m.renderWizardPreview()
+		previewLines := strings.Split(rendered, "\n")
+
+		maxPreviewScroll := len(previewLines) - innerH
+		if maxPreviewScroll < 0 {
+			maxPreviewScroll = 0
+		}
+		if m.wizardPreviewScroll > maxPreviewScroll {
+			m.wizardPreviewScroll = maxPreviewScroll
+		}
+
+		visiblePreviewLines := clipLines(previewLines, m.wizardPreviewScroll, innerH)
+		previewContent = strings.Join(visiblePreviewLines, "\n")
+		previewScrollbar = renderScrollbar(len(previewLines), m.wizardPreviewScroll, innerH, panelHeight)
+	} else if len(filtered) > 0 && m.finderSelectedIndex < len(filtered) {
 		rendered := m.renderSnippetPreview(filtered[m.finderSelectedIndex])
 		previewLines := strings.Split(rendered, "\n")
 
@@ -1002,20 +1321,263 @@ func (m *AppModel) renderMainPanels() string {
 
 		visiblePreviewLines := clipLines(previewLines, m.finderPreviewScroll, innerH)
 		previewContent = strings.Join(visiblePreviewLines, "\n")
+		previewScrollbar = renderScrollbar(len(previewLines), m.finderPreviewScroll, innerH, panelHeight)
 	}
 
 	leftStyle := previewBorder
 	rightStyle := previewBorder
-	if m.finderFocusedPanel == 0 {
+	if m.mode == FinderMode {
+		if m.finderFocusedPanel == 0 {
+			leftStyle = focusedBorder
+		} else {
+			rightStyle = focusedBorder
+		}
+	}
+
+	leftPaneWidth := leftWidth
+	if leftScrollbar != "" {
+		leftPaneWidth = leftWidth - 1
+	}
+	rightPaneWidth := rightWidth
+	if previewScrollbar != "" {
+		rightPaneWidth = rightWidth - 1
+	}
+
+	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(panelHeight)
+	leftBox := leftPaneStyle.Render(listContent)
+	rightPaneStyle := rightStyle.Width(rightPaneWidth).Height(panelHeight)
+	rightBox := rightPaneStyle.Render(previewContent)
+
+	if leftScrollbar != "" {
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(panelHeight)
+		leftBox = lipgloss.JoinHorizontal(lipgloss.Top, leftBox, scrollbarStyle.Render(leftScrollbar))
+	}
+	if previewScrollbar != "" {
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(panelHeight)
+		rightBox = lipgloss.JoinHorizontal(lipgloss.Top, rightBox, scrollbarStyle.Render(previewScrollbar))
+	}
+
+	joined := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, "│", rightBox)
+	return joined + "\n"
+}
+
+func (m *AppModel) renderBrowserPanels() string {
+	var listLines []string
+	for i, item := range m.browserItems {
+		prefix := "  "
+		if i == m.browserSelectedIndex {
+			prefix = "▸ "
+		}
+
+		label := item.name
+		if item.isDir {
+			label = "📁 " + label + "/"
+		} else if item.isFile {
+			label = "📄 " + label
+		} else if item.isSnip {
+			label = "⚡ " + label
+		}
+
+		if i == m.browserSelectedIndex {
+			listLines = append(listLines, selectedItemStyle.Render(prefix+label))
+		} else {
+			listLines = append(listLines, normalItemStyle.Render(prefix+label))
+		}
+	}
+
+	leftWidth, rightWidth, panelHeight := m.panelDims()
+	innerH := m.innerContentHeight(panelHeight)
+
+	visibleListLines := clipLines(listLines, m.browserScrollOffset, innerH)
+	listContent := strings.Join(visibleListLines, "\n")
+	if listContent == "" {
+		listContent = "  Empty directory."
+	}
+
+	leftScrollbar := renderScrollbar(len(listLines), m.browserScrollOffset, innerH, panelHeight)
+
+	previewContent := "No snippet selected."
+	var previewScrollbar string
+	if len(m.browserItems) > 0 && m.browserSelectedIndex < len(m.browserItems) {
+		item := m.browserItems[m.browserSelectedIndex]
+		if item.isSnip {
+			rendered := m.renderSnippetPreview(item.snip)
+			previewLines := strings.Split(rendered, "\n")
+
+			maxPreviewScroll := len(previewLines) - innerH
+			if maxPreviewScroll < 0 {
+				maxPreviewScroll = 0
+			}
+			if m.browserPreviewScroll > maxPreviewScroll {
+				m.browserPreviewScroll = maxPreviewScroll
+			}
+
+			visiblePreviewLines := clipLines(previewLines, m.browserPreviewScroll, innerH)
+			previewContent = strings.Join(visiblePreviewLines, "\n")
+			previewScrollbar = renderScrollbar(len(previewLines), m.browserPreviewScroll, innerH, panelHeight)
+		}
+	}
+
+	leftStyle := previewBorder
+	rightStyle := previewBorder
+	if m.browserFocusedPanel == 0 {
 		leftStyle = focusedBorder
 	} else {
 		rightStyle = focusedBorder
 	}
 
-	leftPaneStyle := leftStyle.Width(leftWidth).Height(panelHeight)
+	leftPaneWidth := leftWidth
+	if leftScrollbar != "" {
+		leftPaneWidth = leftWidth - 1
+	}
+	rightPaneWidth := rightWidth
+	if previewScrollbar != "" {
+		rightPaneWidth = rightWidth - 1
+	}
+
+	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(panelHeight)
 	leftBox := leftPaneStyle.Render(listContent)
-	rightPaneStyle := rightStyle.Width(rightWidth).Height(panelHeight)
+	rightPaneStyle := rightStyle.Width(rightPaneWidth).Height(panelHeight)
 	rightBox := rightPaneStyle.Render(previewContent)
+
+	if leftScrollbar != "" {
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(panelHeight)
+		leftBox = lipgloss.JoinHorizontal(lipgloss.Top, leftBox, scrollbarStyle.Render(leftScrollbar))
+	}
+	if previewScrollbar != "" {
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(panelHeight)
+		rightBox = lipgloss.JoinHorizontal(lipgloss.Top, rightBox, scrollbarStyle.Render(previewScrollbar))
+	}
+
+	joined := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, "│", rightBox)
+	return joined + "\n"
+}
+
+func (m *AppModel) renderTagsPanels() string {
+	leftWidth, rightWidth, panelHeight := m.panelDims()
+	innerH := m.innerContentHeight(panelHeight)
+
+	var listLines []string
+	var previewContent string
+	var listContent string
+	var listScrollbar string
+	var previewScrollbar string
+
+	if m.inTagSnippets {
+		for i, snip := range m.tagSnippets {
+			label := fmt.Sprintf("  %s (%s)", snip.Name, snip.RelativePath)
+			if i == m.tagSnippetsSelectedIndex {
+				listLines = append(listLines, selectedItemStyle.Render("▸"+label[1:]))
+			} else {
+				listLines = append(listLines, normalItemStyle.Render(label))
+			}
+		}
+
+		visibleListLines := clipLines(listLines, m.tagSnippetsScrollOffset, innerH)
+		listContent = strings.Join(visibleListLines, "\n")
+		if listContent == "" {
+			listContent = "  No snippets in tag."
+		}
+
+		listScrollbar = renderScrollbar(len(listLines), m.tagSnippetsScrollOffset, innerH, panelHeight)
+
+		previewContent = "No snippet selected."
+		if len(m.tagSnippets) > 0 && m.tagSnippetsSelectedIndex < len(m.tagSnippets) {
+			rendered := m.renderSnippetPreview(m.tagSnippets[m.tagSnippetsSelectedIndex])
+			previewLines := strings.Split(rendered, "\n")
+
+			maxPreviewScroll := len(previewLines) - innerH
+			if maxPreviewScroll < 0 {
+				maxPreviewScroll = 0
+			}
+			if m.tagSnippetsPreviewScroll > maxPreviewScroll {
+				m.tagSnippetsPreviewScroll = maxPreviewScroll
+			}
+
+			visiblePreviewLines := clipLines(previewLines, m.tagSnippetsPreviewScroll, innerH)
+			previewContent = strings.Join(visiblePreviewLines, "\n")
+			previewScrollbar = renderScrollbar(len(previewLines), m.tagSnippetsPreviewScroll, innerH, panelHeight)
+		}
+	} else {
+		for i, tag := range m.tags {
+			count := m.tagCounts[tag]
+			label := fmt.Sprintf("  #%s (%d)", tag, count)
+			if i == m.tagsSelectedIndex {
+				listLines = append(listLines, selectedItemStyle.Render("▸"+label[1:]))
+			} else {
+				listLines = append(listLines, normalItemStyle.Render(label))
+			}
+		}
+
+		visibleListLines := clipLines(listLines, m.tagsScrollOffset, innerH)
+		listContent = strings.Join(visibleListLines, "\n")
+		if listContent == "" {
+			listContent = "  No tags found."
+		}
+
+		listScrollbar = renderScrollbar(len(listLines), m.tagsScrollOffset, innerH, panelHeight)
+
+		previewContent = "Select a tag to see snippets."
+		if len(m.tags) > 0 && m.tagsSelectedIndex < len(m.tags) {
+			tag := m.tags[m.tagsSelectedIndex]
+			count := m.tagCounts[tag]
+			previewContent = fmt.Sprintf("# %s\n\n**%d snippets**\n\nSelect this tag to browse its snippets.", tag, count)
+			rendered, _ := mdRenderer.Render(previewContent)
+			previewLines := strings.Split(rendered, "\n")
+
+			maxPreviewScroll := len(previewLines) - innerH
+			if maxPreviewScroll < 0 {
+				maxPreviewScroll = 0
+			}
+			if m.tagsPreviewScroll > maxPreviewScroll {
+				m.tagsPreviewScroll = maxPreviewScroll
+			}
+
+			visiblePreviewLines := clipLines(previewLines, m.tagsPreviewScroll, innerH)
+			previewContent = strings.Join(visiblePreviewLines, "\n")
+			previewScrollbar = renderScrollbar(len(previewLines), m.tagsPreviewScroll, innerH, panelHeight)
+		}
+	}
+
+	leftStyle := previewBorder
+	rightStyle := previewBorder
+	if m.inTagSnippets {
+		if m.tagSnippetsFocusedPanel == 0 {
+			leftStyle = focusedBorder
+		} else {
+			rightStyle = focusedBorder
+		}
+	} else {
+		if m.tagsFocusedPanel == 0 {
+			leftStyle = focusedBorder
+		} else {
+			rightStyle = focusedBorder
+		}
+	}
+
+	leftPaneWidth := leftWidth
+	if listScrollbar != "" {
+		leftPaneWidth = leftWidth - 1
+	}
+	rightPaneWidth := rightWidth
+	if previewScrollbar != "" {
+		rightPaneWidth = rightWidth - 1
+	}
+
+	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(panelHeight)
+	leftBox := leftPaneStyle.Render(listContent)
+	rightPaneStyle := rightStyle.Width(rightPaneWidth).Height(panelHeight)
+	rightBox := rightPaneStyle.Render(previewContent)
+
+	if listScrollbar != "" {
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(panelHeight)
+		leftBox = lipgloss.JoinHorizontal(lipgloss.Top, leftBox, scrollbarStyle.Render(listScrollbar))
+	}
+	if previewScrollbar != "" {
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(panelHeight)
+		rightBox = lipgloss.JoinHorizontal(lipgloss.Top, rightBox, scrollbarStyle.Render(previewScrollbar))
+	}
+
 	joined := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, "│", rightBox)
 	return joined + "\n"
 }
