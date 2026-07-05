@@ -51,7 +51,7 @@ func newTestModelWithWizard(cfg *config.Config, termWidth, termHeight int) *AppM
 	return m
 }
 
-// Test that entering wizard mode renders both the wizard panel and the markdown preview.
+// Test that entering wizard mode renders the wizard bar in the header and the panels below.
 func TestWizardOverlayDisplaysBackground(t *testing.T) {
 	cfg := config.DefaultConfig()
 	m := newTestModelWithWizard(cfg, 120, 40)
@@ -59,107 +59,67 @@ func TestWizardOverlayDisplaysBackground(t *testing.T) {
 	if !viewContains(view, "A test snippet") {
 		t.Fatalf("expected preview to contain snippet description, got: %s", view)
 	}
-	if !viewContains(view, "Variable: var") {
-		t.Fatalf("expected wizard overlay to contain variable prompt, got: %s", view)
+	if !viewContains(view, "var:") {
+		t.Fatalf("expected wizard bar to contain variable prompt, got: %s", view)
 	}
 	if !viewContains(view, "┌") && !viewContains(view, "│") {
 		t.Fatalf("expected panel borders in view, got: %s", view)
 	}
 }
 
-// Test that wizard position "right" renders the preview on the left and wizard on the right.
-func TestWizardPositionRight(t *testing.T) {
+// Test that wizard mode renders snippet list on left and preview on right.
+func TestWizardPanelLayout(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.Panel.Position = "right"
-	cfg.Panel.WidthPercent = 60
 	m := newTestModelWithWizard(cfg, 160, 40)
 	view := m.View()
 
 	if !viewContains(view, "test-snippet") {
-		t.Fatal("expected preview to contain snippet name in wizard right position")
+		t.Fatal("expected preview to contain snippet name")
 	}
-	if !viewContains(view, "Variable: var") {
-		t.Fatal("expected wizard panel to be visible in wizard right position")
+	if !viewContains(view, "var:") {
+		t.Fatal("expected wizard bar to be visible in header")
 	}
-	if !viewContains(view, "Fill Template") {
-		t.Fatal("expected wizard instructions in view")
+	if !viewContains(view, "[1/1]") {
+		t.Fatal("expected wizard progress in bar")
 	}
 	if !viewHasSideBySide(view) {
-		t.Fatalf("expected preview and wizard to render side by side for position 'right'\n%s", view)
+		t.Fatalf("expected snippet list and preview to render side by side\n%s", view)
 	}
 }
 
-// Test that wizard position "left" renders the wizard on the left and preview on the right.
-func TestWizardPositionLeft(t *testing.T) {
+// Test that wizard bar shows progress and variable name.
+func TestWizardBarContent(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.Panel.Position = "left"
-	cfg.Panel.WidthPercent = 60
-	m := newTestModelWithWizard(cfg, 160, 40)
-	view := m.View()
-
-	if !viewContains(view, "test-snippet") {
-		t.Fatal("expected preview to contain snippet name in wizard left position")
-	}
-	if !viewContains(view, "Variable: var") {
-		t.Fatal("expected wizard panel to be visible in wizard left position")
-	}
-	if !viewHasSideBySide(view) {
-		t.Fatalf("expected wizard and preview to render side by side for position 'left'\n%s", view)
-	}
-}
-
-// Test that wizard position "bottom" renders the wizard below the main panels.
-func TestWizardPositionBottom(t *testing.T) {
-	cfg := config.DefaultConfig()
-	cfg.Panel.Position = "bottom"
-	cfg.Panel.HeightPercent = 50
 	m := newTestModelWithWizard(cfg, 120, 50)
 	view := m.View()
 
 	if !viewContains(view, "A test snippet") {
-		t.Fatal("expected preview to be visible in wizard bottom position")
+		t.Fatal("expected preview to be visible")
 	}
-	if !viewContains(view, "Variable: var") {
-		t.Fatal("expected wizard panel to be visible in wizard bottom position")
+	if !viewContains(view, "[1/1]") {
+		t.Fatal("expected wizard progress in bar")
 	}
-
-	lines := strings.Split(view, "\n")
-	previewLineIdx := -1
-	wizardLineIdx := -1
-	for i, line := range lines {
-		clean := stripANSI(line)
-		if strings.Contains(clean, "A test snippet") && previewLineIdx == -1 {
-			previewLineIdx = i
-		}
-		if strings.Contains(clean, "Variable: var") && wizardLineIdx == -1 {
-			wizardLineIdx = i
-		}
-	}
-	if previewLineIdx == -1 || wizardLineIdx == -1 {
-		t.Fatal("expected both preview and wizard content in view")
-	}
-	if wizardLineIdx <= previewLineIdx {
-		t.Fatal("expected wizard panel to appear below preview for position 'bottom'")
+	if !viewContains(view, "test-snippet > var:") {
+		t.Fatal("expected wizard bar to contain snippet name and variable")
 	}
 }
 
-// Test that custom width percentages affect the wizard panel sizing.
+// Test that custom width percentages affect the panel sizing in wizard mode.
 func TestWizardResizableWidth(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.Panel.Position = "left"
 	cfg.Panel.WidthPercent = 75
 	m := newTestModelWithWizard(cfg, 160, 40)
 	view := m.View()
 
-	if !viewContains(view, "Variable: var") {
-		t.Fatal("expected wizard panel content with custom width")
+	if !viewContains(view, "var:") {
+		t.Fatal("expected wizard bar content with custom width")
 	}
 	if !viewContains(view, "A test snippet") {
 		t.Fatal("expected preview content with custom width")
 	}
 }
 
-// Test that the finder header and search input are visible when wizard is open.
+// Test that the wizard header instructions are visible.
 func TestWizardShowsFinderHeader(t *testing.T) {
 	cfg := config.DefaultConfig()
 	m := newTestModelWithWizard(cfg, 160, 40)
@@ -168,7 +128,10 @@ func TestWizardShowsFinderHeader(t *testing.T) {
 	if !strings.Contains(view, "PEANUTCLONE") {
 		t.Fatal("expected header title in wizard view")
 	}
-	if !strings.Contains(view, "Ctrl+T") || !strings.Contains(view, "Enter: next var") {
+	if !strings.Contains(view, "Form") {
+		t.Fatal("expected Form mode label in wizard header")
+	}
+	if !strings.Contains(view, "Enter/Tab: next") || !strings.Contains(view, "Esc: cancel") {
 		t.Fatal("expected wizard instructions in wizard view")
 	}
 }
@@ -237,8 +200,8 @@ func TestWizardSelectPlaceholder_SuggestionsRendered(t *testing.T) {
 	}
 
 	view := m.View()
-	if !strings.Contains(view, "Suggestions:") {
-		t.Fatal("expected wizard view to contain Suggestions header")
+	if !strings.Contains(view, "suggestions:") {
+		t.Fatal("expected wizard view to contain suggestions label")
 	}
 	for _, opt := range expectedOpts {
 		if !strings.Contains(view, opt) {
