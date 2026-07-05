@@ -8,15 +8,23 @@ type VariableSpec struct {
 	Command     string   `yaml:"command,omitempty" toml:"command,omitempty"`
 }
 
+// Boundaries defines custom delimiters for variable placeholders.
+type Boundaries struct {
+	Open  string `yaml:"open,omitempty" toml:"open,omitempty"`
+	Close string `yaml:"close,omitempty" toml:"close,omitempty"`
+}
+
 // Placeholder represents a specific occurrence of a variable template inside the snippet body.
 // E.g., <@container>, <@host:rg . --files>, <@port:?8080>.
 type Placeholder struct {
-	Name         string
-	Raw          string
-	DefaultValue string
-	Command      string
-	IsDefault    bool
-	IsCommand    bool
+	Name          string
+	Raw           string
+	DefaultValue  string
+	Command       string
+	IsDefault     bool
+	IsCommand     bool
+	SelectOptions []string // Non-nil when the placeholder is a select-type variable
+	IsSelect      bool
 }
 
 // Snippet represents a single snippet declared under a "##" header in a Markdown file.
@@ -30,6 +38,7 @@ type Snippet struct {
 	SourceFile   string        // Absolute file path
 	RelativePath string        // Relative file path from the snippet root
 	Tags         []string      // Tags inherited from file frontmatter
+	Boundaries   Boundaries    // Custom variable boundary characters
 }
 
 // Frontmatter represents the YAML frontmatter metadata at the top of a Markdown snippet file.
@@ -38,6 +47,7 @@ type Frontmatter struct {
 	Description string                  `yaml:"description"`
 	Tags        []string                `yaml:"tags"`
 	Variables   map[string]VariableSpec `yaml:"variables"`
+	Boundaries  Boundaries              `yaml:"boundaries"`
 }
 
 // SnippetFile represents a parsed markdown file containing frontmatter and snippets.

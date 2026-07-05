@@ -11,6 +11,8 @@ import (
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/glamour"
+	glamourStyles "github.com/charmbracelet/glamour/styles"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -555,6 +557,11 @@ var (
     instructionsStyle = lipgloss.NewStyle().
         Italic(true).
         Foreground(lipgloss.Color("#888888"))
+
+	mdRenderer, _ = glamour.NewTermRenderer(
+		glamour.WithStyles(glamourStyles.DarkStyleConfig),
+		glamour.WithWordWrap(0),
+	)
 )
 
 func (m *AppModel) View() string {
@@ -713,18 +720,27 @@ func (m *AppModel) renderMainPanels() string {
     previewContent := "No snippet selected."
     if len(filtered) > 0 && m.finderSelectedIndex < len(filtered) {
         snip := filtered[m.finderSelectedIndex]
-        var tagsStr string
+        var md strings.Builder
+        md.WriteString("# " + snip.Name + "\n\n")
         if len(snip.Tags) > 0 {
-            tagsStr = fmt.Sprintf("Tags: [%s]\n", strings.Join(snip.Tags, ", "))
+            md.WriteString("**Tags:** " + strings.Join(snip.Tags, ", ") + "\n\n")
         }
-        previewContent = fmt.Sprintf("%s\n\n%s%s\n\n%s\n%s\n%s",
-            headerStyle.Render(snip.Name),
-            tagsStr,
-            snip.Description,
-            headerStyle.Render("Code:"),
-            "```"+snip.Language,
-            snip.Body,
-        )
+        if snip.Description != "" {
+            md.WriteString(snip.Description + "\n\n")
+        }
+        md.WriteString("## Code\n\n")
+        md.WriteString("```")
+        if snip.Language != "" {
+            md.WriteString(snip.Language)
+        }
+        md.WriteString("\n" + snip.Body)
+        if !strings.HasSuffix(snip.Body, "\n") {
+            md.WriteString("\n")
+        }
+        md.WriteString("```\n")
+
+        renderedMD, _ := mdRenderer.Render(md.String())
+        previewContent = renderedMD
     }
 
     // Dynamic pane widths
