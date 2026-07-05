@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/pelletier/go-toml/v2"
-	"peanutclone/internal/domain"
+	"basin/internal/domain"
 )
 
 // PathsConfig holds the list of paths where snippets are stored.
@@ -57,7 +57,7 @@ func LoadConfig(path string) (*Config, error) {
 	if path == "" {
 		home, err := os.UserHomeDir()
 		if err == nil {
-			path = filepath.Join(home, ".config", "peanutbutter", "config.toml")
+			path = filepath.Join(home, ".config", "basin", "config.toml")
 		}
 	}
 

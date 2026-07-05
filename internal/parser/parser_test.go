@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"peanutclone/internal/domain"
+	"basin/internal/domain"
 )
 
 func TestParseFile_Simple(t *testing.T) {

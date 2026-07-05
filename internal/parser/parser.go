@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
-	"peanutclone/internal/domain"
+	"basin/internal/domain"
 )
 
 var defaultBoundaries = domain.Boundaries{Open: "<", Close: ">"}

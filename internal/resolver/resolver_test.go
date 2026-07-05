@@ -4,8 +4,8 @@ import (
 	"os"
 	"testing"
 
-	"peanutclone/internal/config"
-	"peanutclone/internal/domain"
+	"basin/internal/config"
+	"basin/internal/domain"
 )
 
 func TestShellQuote(t *testing.T) {

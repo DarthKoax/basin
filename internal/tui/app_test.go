@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"peanutclone/internal/config"
-	"peanutclone/internal/domain"
+	"basin/internal/config"
+	"basin/internal/domain"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -41,7 +41,7 @@ func newTestModelWithWizard(cfg *config.Config, termWidth, termHeight int) *AppM
 	snip := newTestSnippet()
 	snippets := []domain.Snippet{snip}
 	files := []domain.SnippetFile{}
-	m := NewAppModel(cfg, snippets, files)
+	m := NewAppModel(cfg, nil, snippets, files)
 	m.mode = WizardMode
 	m.wizardSnippet = snip
 	m.wizardVarIndex = 0
@@ -125,7 +125,7 @@ func TestWizardShowsFinderHeader(t *testing.T) {
 	m := newTestModelWithWizard(cfg, 160, 40)
 	view := m.View()
 
-	if !strings.Contains(view, "PEANUTCLONE") {
+	if !strings.Contains(view, "BASIN") {
 		t.Fatal("expected header title in wizard view")
 	}
 	if !strings.Contains(view, "Form") {
@@ -165,7 +165,7 @@ func TestWizardSelectPlaceholder_SuggestionsRendered(t *testing.T) {
 	}
 	snippets := []domain.Snippet{snip}
 
-	m := NewAppModel(cfg, snippets, files)
+	m := NewAppModel(cfg, nil, snippets, files)
 	m.mode = WizardMode
 	m.wizardSnippet = snip
 	m.wizardVarIndex = 0
@@ -239,7 +239,7 @@ func TestWizardSelect_NavigateSuggestions(t *testing.T) {
 	}
 	snippets := []domain.Snippet{snip}
 
-	m := NewAppModel(cfg, snippets, files)
+	m := NewAppModel(cfg, nil, snippets, files)
 	m.mode = WizardMode
 	m.wizardSnippet = snip
 	m.wizardVarIndex = 0
@@ -305,7 +305,7 @@ func TestWizardSelect_ConfirmAndAdvance(t *testing.T) {
 	}
 	snippets := []domain.Snippet{snip}
 
-	m := NewAppModel(cfg, snippets, files)
+	m := NewAppModel(cfg, nil, snippets, files)
 	m.mode = WizardMode
 	m.wizardSnippet = snip
 	m.wizardVarIndex = 0
@@ -374,7 +374,7 @@ func TestWizardSelect_FullRenderConfirmCopiesSnippet(t *testing.T) {
 	}
 	snippets := []domain.Snippet{snip}
 
-	m := NewAppModel(cfg, snippets, files)
+	m := NewAppModel(cfg, nil, snippets, files)
 	m.mode = WizardMode
 	m.wizardSnippet = snip
 	m.wizardVarIndex = 0

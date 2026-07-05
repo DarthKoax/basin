@@ -3,7 +3,7 @@ package search
 import (
 	"testing"
 
-	"peanutclone/internal/domain"
+	"basin/internal/domain"
 )
 
 func TestParseQuery(t *testing.T) {
