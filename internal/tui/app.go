@@ -11,9 +11,9 @@ import (
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	glamourStyles "github.com/charmbracelet/glamour/styles"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -554,9 +554,9 @@ var (
 			BorderForeground(lipgloss.Color("#444444")).
 			Padding(1)
 
-    instructionsStyle = lipgloss.NewStyle().
-        Italic(true).
-        Foreground(lipgloss.Color("#888888"))
+	instructionsStyle = lipgloss.NewStyle().
+				Italic(true).
+				Foreground(lipgloss.Color("#888888"))
 
 	mdRenderer, _ = glamour.NewTermRenderer(
 		glamour.WithStyles(glamourStyles.DarkStyleConfig),
@@ -564,89 +564,178 @@ var (
 	)
 )
 
+// panelDims returns the dimensions for the left and right panels, reserving
+// room for the header region (title + instructions + search input = 3 rows).
+func (m *AppModel) panelDims() (leftWidth, rightWidth, height int) {
+	const headerRows = 3
+	availHeight := m.termHeight - headerRows
+	if availHeight < 1 {
+		availHeight = 10
+	}
+	height = availHeight * m.config.Panel.HeightPercent / 105
+	if height < 1 {
+		height = availHeight
+	}
+
+	leftWidth = m.termWidth * m.config.Panel.WidthPercent / 105
+	if leftWidth < 1 {
+		leftWidth = 40
+	}
+	rightWidth = m.termWidth - leftWidth - 5
+	if rightWidth < 1 {
+		rightWidth = 20
+	}
+	return
+}
+
 func (m *AppModel) View() string {
-    if m.Done {
-        return fmt.Sprintf("Snippet copied to clipboard!\n\n%s\n", m.FinalSnippet)
-    }
+	if m.Done {
+		return fmt.Sprintf("Snippet copied to clipboard!\n\n%s\n", m.FinalSnippet)
+	}
 
-    var sb strings.Builder
+	var sb strings.Builder
 
-    // Render header title
-    sb.WriteString(titleStyle.Render("PEANUTCLONE") + " ")
+	// Render header title
+	sb.WriteString(titleStyle.Render("PEANUTCLONE") + " ")
 
-    switch m.mode {
-    case FinderMode:
+	switch m.mode {
+	case FinderMode:
 		// Render the primary finder interface (panes)
 		sb.WriteString(instructionsStyle.Render("[Ctrl+T: mode] Enter: pick") + "\n")
 		sb.WriteString(m.finderQuery.View() + "\n")
 		sb.WriteString(m.renderMainPanels())
-    case BrowserMode:
-        sb.WriteString(instructionsStyle.Render(fmt.Sprintf("[Browser: /%s]  Ctrl+T: mode  Enter: open/pick  Esc: up", m.browserPath)) + "\n\n")
+	case BrowserMode:
+		sb.WriteString(instructionsStyle.Render(fmt.Sprintf("[Browser: /%s]  Ctrl+T: mode  Enter: open/pick  Esc: up", m.browserPath)) + "\n\n")
 
-        var listLines []string
-        for i, item := range m.browserItems {
-            prefix := "  "
-            if i == m.browserSelectedIndex {
-                prefix = "▸ "
-            }
+		var listLines []string
+		for i, item := range m.browserItems {
+			prefix := "  "
+			if i == m.browserSelectedIndex {
+				prefix = "▸ "
+			}
 
-            label := item.name
-            if item.isDir {
-                label = "📁 " + label + "/"
-            } else if item.isFile {
-                label = "📄 " + label
-            } else if item.isSnip {
-                label = "⚡ " + label
-            }
+			label := item.name
+			if item.isDir {
+				label = "📁 " + label + "/"
+			} else if item.isFile {
+				label = "📄 " + label
+			} else if item.isSnip {
+				label = "⚡ " + label
+			}
 
-            if i == m.browserSelectedIndex {
-                listLines = append(listLines, selectedItemStyle.Render(prefix+label))
-            } else {
-                listLines = append(listLines, normalItemStyle.Render(prefix+label))
-            }
-        }
+			if i == m.browserSelectedIndex {
+				listLines = append(listLines, selectedItemStyle.Render(prefix+label))
+			} else {
+				listLines = append(listLines, normalItemStyle.Render(prefix+label))
+			}
+		}
 
-        listContent := strings.Join(listLines, "\n")
-        if listContent == "" {
-            listContent = "  Empty directory."
-        }
-        sb.WriteString(listContent)
-    case TagsMode:
-        if m.inTagSnippets {
-            sb.WriteString(instructionsStyle.Render(fmt.Sprintf("[Tag: %s]  Enter: pick  Esc: back", m.selectedTag)) + "\n\n")
+		listContent := strings.Join(listLines, "\n")
+		if listContent == "" {
+			listContent = "  Empty directory."
+		}
+		sb.WriteString(listContent)
+	case TagsMode:
+		if m.inTagSnippets {
+			sb.WriteString(instructionsStyle.Render(fmt.Sprintf("[Tag: %s]  Enter: pick  Esc: back", m.selectedTag)) + "\n\n")
 
-            var listLines []string
-            for i, snip := range m.tagSnippets {
-                label := fmt.Sprintf("  %s (%s)", snip.Name, snip.RelativePath)
-                if i == m.tagSnippetsSelectedIndex {
-                    listLines = append(listLines, selectedItemStyle.Render("▸"+label[1:]))
-                } else {
-                    listLines = append(listLines, normalItemStyle.Render(label))
-                }
-            }
-            listContent := strings.Join(listLines, "\n")
-            sb.WriteString(listContent)
-        } else {
-            sb.WriteString(instructionsStyle.Render("[Tags Dashboard]  Ctrl+T: mode  Enter: open") + "\n\n")
+			var listLines []string
+			for i, snip := range m.tagSnippets {
+				label := fmt.Sprintf("  %s (%s)", snip.Name, snip.RelativePath)
+				if i == m.tagSnippetsSelectedIndex {
+					listLines = append(listLines, selectedItemStyle.Render("▸"+label[1:]))
+				} else {
+					listLines = append(listLines, normalItemStyle.Render(label))
+				}
+			}
+			listContent := strings.Join(listLines, "\n")
+			sb.WriteString(listContent)
+		} else {
+			sb.WriteString(instructionsStyle.Render("[Tags Dashboard]  Ctrl+T: mode  Enter: open") + "\n\n")
 
-            var listLines []string
-            for i, tag := range m.tags {
-                count := m.tagCounts[tag]
-                label := fmt.Sprintf("  #%s (%d)", tag, count)
-                if i == m.tagsSelectedIndex {
-                    listLines = append(listLines, selectedItemStyle.Render("▸"+label[1:]))
-                } else {
-                    listLines = append(listLines, normalItemStyle.Render(label))
-                }
-            }
-            listContent := strings.Join(listLines, "\n")
-            sb.WriteString(listContent)
-        }
-    case WizardMode:
-	// First render the background panels (list + preview)
-	background := m.renderMainPanels()
+			var listLines []string
+			for i, tag := range m.tags {
+				count := m.tagCounts[tag]
+				label := fmt.Sprintf("  #%s (%d)", tag, count)
+				if i == m.tagsSelectedIndex {
+					listLines = append(listLines, selectedItemStyle.Render("▸"+label[1:]))
+				} else {
+					listLines = append(listLines, normalItemStyle.Render(label))
+				}
+			}
+			listContent := strings.Join(listLines, "\n")
+			sb.WriteString(listContent)
+		}
+	case WizardMode:
+		sb.WriteString(instructionsStyle.Render("[Ctrl+T: mode] Enter: pick") + "\n")
+		sb.WriteString(m.finderQuery.View() + "\n")
 
-	// Build wizard content
+		wizardContent := m.renderWizardContent()
+		previewContent := m.renderSnippetPreview(m.wizardSnippet)
+
+		wizardWidth, previewWidth, panelHeight := m.panelDims()
+
+		wizardPanelStyle := lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color("#444444")).
+			Padding(1).
+			Width(wizardWidth).
+			Height(panelHeight)
+
+		wizardPanel := wizardPanelStyle.Render(wizardContent)
+
+		previewPanelStyle := lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color("#444444")).
+			Padding(1).
+			Width(previewWidth).
+			Height(panelHeight)
+
+		previewPanel := previewPanelStyle.Render(previewContent)
+
+		switch m.config.Panel.Position {
+		case "left":
+			sb.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, wizardPanel, "│", previewPanel))
+		case "right":
+			sb.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, previewPanel, "│", wizardPanel))
+		case "bottom":
+			sb.WriteString(m.renderMainPanels())
+			sb.WriteString(wizardPanel)
+		default:
+			sb.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, wizardPanel, "│", previewPanel))
+		}
+	}
+
+	return sb.String()
+}
+
+// renderSnippetPreview builds the markdown preview for a specific snipped, used as the right panel during wizard.
+func (m *AppModel) renderSnippetPreview(snip domain.Snippet) string {
+	var md strings.Builder
+	md.WriteString("# " + snip.Name + "\n\n")
+	if len(snip.Tags) > 0 {
+		md.WriteString("**Tags:** " + strings.Join(snip.Tags, ", ") + "\n\n")
+	}
+	if snip.Description != "" {
+		md.WriteString(snip.Description + "\n\n")
+	}
+	md.WriteString("## Code\n\n")
+	md.WriteString("```")
+	if snip.Language != "" {
+		md.WriteString(snip.Language)
+	}
+	md.WriteString("\n" + snip.Body)
+	if !strings.HasSuffix(snip.Body, "\n") {
+		md.WriteString("\n")
+	}
+	md.WriteString("```\n")
+
+	renderedMD, _ := mdRenderer.Render(md.String())
+	return renderedMD
+}
+
+// renderWizardContent builds the wizard panel inner content.
+func (m *AppModel) renderWizardContent() string {
 	p := m.wizardSnippet.Placeholders[m.wizardVarIndex]
 	var wizard strings.Builder
 	wizard.WriteString(instructionsStyle.Render(fmt.Sprintf("[Fill Template: %d/%d]  Enter: next  Shift+Tab: back  Esc: cancel", m.wizardVarIndex+1, len(m.wizardSnippet.Placeholders))) + "\n\n")
@@ -667,7 +756,6 @@ func (m *AppModel) View() string {
 			}
 		}
 	}
-	// Live preview
 	previewVals := make(map[string]string)
 	for k, v := range m.wizardConfirmed {
 		previewVals[k] = v
@@ -679,83 +767,39 @@ func (m *AppModel) View() string {
 	preview := r.RenderSnippet(previewVals)
 	wizard.WriteString("\n" + headerStyle.Render("Preview:") + "\n")
 	wizard.WriteString(preview + "\n")
-
-	// Style the floating pane
-	overlayStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("#444444")).
-		Padding(1).
-		Width(m.termWidth / 2).
-		Height(m.termHeight / 2)
-	overlay := overlayStyle.Render(wizard.String())
-	// Combine background with overlay using lipgloss overlay
-
-	combined := background + "\n" + overlay
-	sb.WriteString(combined)
-    }
-
-    return sb.String()
+	return wizard.String()
 }
 
 // renderMainPanels builds the left/right pane view used by Finder and as background for Wizard.
 func (m *AppModel) renderMainPanels() string {
-    filtered := search.FilterSnippets(m.allSnippets, m.finderQuery.Value())
+	filtered := search.FilterSnippets(m.allSnippets, m.finderQuery.Value())
 
-    var listLines []string
-    for i, snip := range filtered {
-        label := fmt.Sprintf("  %s (%s)", snip.Name, snip.RelativePath)
-        if i == m.finderSelectedIndex {
-            listLines = append(listLines, selectedItemStyle.Render("▸"+label[1:]))
-        } else {
-            listLines = append(listLines, normalItemStyle.Render(label))
-        }
-    }
+	var listLines []string
+	for i, snip := range filtered {
+		label := fmt.Sprintf("  %s (%s)", snip.Name, snip.RelativePath)
+		if i == m.finderSelectedIndex {
+			listLines = append(listLines, selectedItemStyle.Render("▸"+label[1:]))
+		} else {
+			listLines = append(listLines, normalItemStyle.Render(label))
+		}
+	}
 
-    listContent := strings.Join(listLines, "\n")
-    if listContent == "" {
-        listContent = "  No matches found."
-    }
+	listContent := strings.Join(listLines, "\n")
+	if listContent == "" {
+		listContent = "  No matches found."
+	}
 
-    // Preview pane content
-    previewContent := "No snippet selected."
-    if len(filtered) > 0 && m.finderSelectedIndex < len(filtered) {
-        snip := filtered[m.finderSelectedIndex]
-        var md strings.Builder
-        md.WriteString("# " + snip.Name + "\n\n")
-        if len(snip.Tags) > 0 {
-            md.WriteString("**Tags:** " + strings.Join(snip.Tags, ", ") + "\n\n")
-        }
-        if snip.Description != "" {
-            md.WriteString(snip.Description + "\n\n")
-        }
-        md.WriteString("## Code\n\n")
-        md.WriteString("```")
-        if snip.Language != "" {
-            md.WriteString(snip.Language)
-        }
-        md.WriteString("\n" + snip.Body)
-        if !strings.HasSuffix(snip.Body, "\n") {
-            md.WriteString("\n")
-        }
-        md.WriteString("```\n")
+	// Preview pane content
+	previewContent := "No snippet selected."
+	if len(filtered) > 0 && m.finderSelectedIndex < len(filtered) {
+		previewContent = m.renderSnippetPreview(filtered[m.finderSelectedIndex])
+	}
 
-        renderedMD, _ := mdRenderer.Render(md.String())
-        previewContent = renderedMD
-    }
-
-    // Dynamic pane widths
-    leftWidth := m.termWidth / 2
-    if leftWidth < 1 {
-        leftWidth = 40
-    }
-    rightWidth := m.termWidth - leftWidth - 1
-    if rightWidth < 1 {
-        rightWidth = 35
-    }
-    leftPaneStyle := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("#444444")).Padding(1).Width(leftWidth)
-    leftBox := leftPaneStyle.Render(listContent)
-    rightPaneStyle := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("#444444")).Padding(1).Width(rightWidth)
-    rightBox := rightPaneStyle.Render(previewContent)
-    joined := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, "│", rightBox)
-    return joined + "\n"
+	leftWidth, rightWidth, panelHeight := m.panelDims()
+	leftPaneStyle := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("#444444")).Padding(1).Width(leftWidth).Height(panelHeight)
+	leftBox := leftPaneStyle.Render(listContent)
+	rightPaneStyle := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("#444444")).Padding(1).Width(rightWidth).Height(panelHeight)
+	rightBox := rightPaneStyle.Render(previewContent)
+	joined := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, "│", rightBox)
+	return joined + "\n"
 }

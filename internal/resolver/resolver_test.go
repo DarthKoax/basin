@@ -404,7 +404,7 @@ func TestResolver_RenderSnippet_SelectDefaultFallback(t *testing.T) {
 
 func TestResolver_RenderSnippet_CustomBoundaries(t *testing.T) {
 	snip := domain.Snippet{
-		Body: "echo {{@name:?world}} {{@greeting}}",
+		Body:       "echo {{@name:?world}} {{@greeting}}",
 		Boundaries: domain.Boundaries{Open: "{{", Close: "}}"},
 		Placeholders: []domain.Placeholder{
 			{

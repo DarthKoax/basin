@@ -20,10 +20,18 @@ type SuggestionCommandsConfig struct {
 	AllowCommands bool `toml:"allow_commands"`
 }
 
+// PanelConfig holds settings for panel position and sizing across the whole app.
+type PanelConfig struct {
+	Position      string `toml:"position"`
+	WidthPercent  int    `toml:"width_percent"`
+	HeightPercent int    `toml:"height_percent"`
+}
+
 // Config represents the application configuration format.
 type Config struct {
 	Paths              PathsConfig                     `toml:"paths"`
 	SuggestionCommands SuggestionCommandsConfig        `toml:"suggestion_commands"`
+	Panel              PanelConfig                     `toml:"panel"`
 	Variables          map[string]domain.VariableSpec `toml:"variables"`
 }
 
@@ -33,6 +41,11 @@ func DefaultConfig() *Config {
 		SuggestionCommands: SuggestionCommandsConfig{
 			TimeoutMS:     2000,
 			AllowCommands: true,
+		},
+		Panel: PanelConfig{
+			Position:      "left",
+			WidthPercent:  25,
+			HeightPercent: 100,
 		},
 		Variables: make(map[string]domain.VariableSpec),
 	}
@@ -64,6 +77,16 @@ func LoadConfig(path string) (*Config, error) {
 	// Apply default values if omitted or 0
 	if cfg.SuggestionCommands.TimeoutMS <= 0 {
 		cfg.SuggestionCommands.TimeoutMS = 2000
+	}
+
+	if cfg.Panel.Position == "" {
+		cfg.Panel.Position = "left"
+	}
+	if cfg.Panel.WidthPercent <= 0 || cfg.Panel.WidthPercent > 100 {
+		cfg.Panel.WidthPercent = 25
+	}
+	if cfg.Panel.HeightPercent <= 0 || cfg.Panel.HeightPercent > 100 {
+		cfg.Panel.HeightPercent = 100
 	}
 
 	return cfg, nil
