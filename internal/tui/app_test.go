@@ -168,8 +168,8 @@ func TestWizardShowsFinderHeader(t *testing.T) {
 	if !strings.Contains(view, "PEANUTCLONE") {
 		t.Fatal("expected header title in wizard view")
 	}
-	if !strings.Contains(view, "Ctrl+T") || !strings.Contains(view, "Enter: pick") {
-		t.Fatal("expected finder instructions in wizard view")
+	if !strings.Contains(view, "Ctrl+T") || !strings.Contains(view, "Enter: next var") {
+		t.Fatal("expected wizard instructions in wizard view")
 	}
 }
 
