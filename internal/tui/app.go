@@ -55,6 +55,14 @@ type command struct {
 	action      func() tea.Cmd
 }
 
+type floatingPane struct {
+	active  bool
+	title   string
+	content []string
+	width   int
+	height  int
+}
+
 type AppModel struct {
 	termWidth    int
 	termHeight   int
@@ -113,6 +121,20 @@ type AppModel struct {
 	wizardPreviewScroll int
 
 	listTopOffset int
+
+	floatingPane floatingPane
+}
+
+func (m *AppModel) showFloatingPane(title string, content []string, width, height int) {
+	m.floatingPane.active = true
+	m.floatingPane.title = title
+	m.floatingPane.content = content
+	m.floatingPane.width = width
+	m.floatingPane.height = height
+}
+
+func (m *AppModel) hideFloatingPane() {
+	m.floatingPane.active = false
 }
 
 func NewAppModel(cfg *config.Config, roots []string, snippets []domain.Snippet, files []domain.SnippetFile) *AppModel {
@@ -324,6 +346,20 @@ func (m *AppModel) initCommands() {
 			},
 		},
 		{
+			name:        "Show Floating Pane",
+			description: "Display a centered floating overlay pane",
+			action: func() tea.Cmd {
+				m.showFloatingPane("Floating Pane", []string{
+					"This is a floating pane overlay.",
+					"It is centered and does not break",
+					"the panes underneath.",
+					"",
+					"Press Esc, Enter, or Q to dismiss.",
+				}, 50, 12)
+				return nil
+			},
+		},
+		{
 			name:        "Quit",
 			description: "Exit the application",
 			action: func() tea.Cmd {
@@ -528,6 +564,14 @@ func (m *AppModel) retainSelectionAfterReload() {
 func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.floatingPane.active {
+			switch msg.String() {
+			case "esc", "enter", "q":
+				m.hideFloatingPane()
+				return m, nil
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "ctrl+d":
 			return m, tea.Quit
@@ -554,6 +598,15 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.mode != WizardMode && m.mode != CommandPaletteMode {
 				return m, m.openEditorForCurrentStrand()
 			}
+		case "ctrl+f":
+			m.showFloatingPane("Floating Pane", []string{
+				"This is a floating pane overlay.",
+				"It is centered and does not break",
+				"the panes underneath.",
+				"",
+				"Press Esc, Enter, or Q to dismiss.",
+			}, 50, 12)
+			return m, nil
 		}
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
@@ -1299,6 +1352,10 @@ func (m *AppModel) View() string {
 
 	sb.WriteString(footer)
 
+	if m.floatingPane.active {
+		return m.renderWithFloatingPane(sb.String())
+	}
+
 	return sb.String()
 }
 
@@ -1336,28 +1393,28 @@ func (m *AppModel) renderFooter() string {
 	switch m.mode {
 	case FinderMode:
 		if m.finderFocusedPanel == 0 {
-			instructions = "Enter: wizard  Tab: focus preview  Ctrl+E: edit  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+			instructions = "Enter: wizard  Tab: focus preview  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
 		} else {
-			instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+			instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
 		}
 	case BrowserMode:
 		if m.browserFocusedPanel == 0 {
-			instructions = "Enter: open/wizard  Ctrl+E: edit  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+			instructions = "Enter: open/wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
 		} else {
-			instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+			instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
 		}
 	case TagsMode:
 		if m.inTagSnippets {
 			if m.tagSnippetsFocusedPanel == 0 {
-				instructions = "Enter: wizard  Ctrl+E: edit  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+				instructions = "Enter: wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
 			} else {
-				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
 			}
 		} else {
 			if m.tagsFocusedPanel == 0 {
-				instructions = "Enter: open  Ctrl+E: edit  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+				instructions = "Enter: open  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
 			} else {
-				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
 			}
 		}
 	case WizardMode:
@@ -1849,4 +1906,90 @@ func (m *AppModel) renderTagsPanels() string {
 
 	joined := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, "│", rightBox)
 	return joined + "\n"
+}
+
+func (m *AppModel) renderWithFloatingPane(baseView string) string {
+	baseLines := strings.Split(baseView, "\n")
+
+	for len(baseLines) < m.termHeight {
+		baseLines = append(baseLines, "")
+	}
+
+	floatingWidth := m.floatingPane.width
+	floatingHeight := m.floatingPane.height
+
+	if floatingWidth > m.termWidth-4 {
+		floatingWidth = m.termWidth - 4
+	}
+	if floatingHeight > m.termHeight-4 {
+		floatingHeight = m.termHeight - 4
+	}
+
+	startX := (m.termWidth - floatingWidth) / 2
+	startY := (m.termHeight - floatingHeight) / 2
+
+	if startX < 0 {
+		startX = 0
+	}
+	if startY < 0 {
+		startY = 0
+	}
+
+	floatingPaneStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#FFD700")).
+		Background(lipgloss.Color("#1E1E1E")).
+		Width(floatingWidth - 2).
+		Height(floatingHeight - 2).
+		Padding(1, 1)
+
+	var contentBuilder strings.Builder
+	if m.floatingPane.title != "" {
+		contentBuilder.WriteString(titleStyle.Render(m.floatingPane.title) + "\n\n")
+	}
+	for _, line := range m.floatingPane.content {
+		contentBuilder.WriteString(line + "\n")
+	}
+
+	renderedContent := floatingPaneStyle.Render(contentBuilder.String())
+	contentLines := strings.Split(renderedContent, "\n")
+
+	var result strings.Builder
+	for i := 0; i < m.termHeight; i++ {
+		if i >= startY && i < startY+floatingHeight && i-startY < len(contentLines) {
+			baseLine := ""
+			if i < len(baseLines) {
+				baseLine = baseLines[i]
+			}
+
+			contentLine := contentLines[i-startY]
+
+			// Write base content up to startX
+			if startX > 0 && len(baseLine) > 0 {
+				if startX <= len(baseLine) {
+					result.WriteString(baseLine[:startX])
+				} else {
+					result.WriteString(baseLine)
+				}
+			}
+
+			// Write floating pane content
+			result.WriteString(contentLine)
+
+			// Fill the rest of the line with spaces to hide content behind the pane
+			remainingWidth := m.termWidth - startX - floatingWidth
+			if remainingWidth > 0 {
+				result.WriteString(strings.Repeat(" ", remainingWidth))
+			}
+
+			result.WriteString("\n")
+		} else if i < len(baseLines) {
+			result.WriteString(baseLines[i])
+			result.WriteString("\n")
+		} else {
+			result.WriteString("\n")
+		}
+	}
+
+	return result.String()
 }
