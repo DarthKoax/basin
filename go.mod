@@ -1,4 +1,4 @@
-module peanutclone
+module basin
 
 go 1.26.3
 

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"peanutclone/internal/config"
-	"peanutclone/internal/domain"
+	"basin/internal/config"
+	"basin/internal/domain"
 )
 
 var dependentRegex = regexp.MustCompile(`(\\)?<#([a-zA-Z0-9_-]+)(:raw)?>`)

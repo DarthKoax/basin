@@ -3,7 +3,7 @@ package search
 import (
 	"strings"
 
-	"peanutclone/internal/domain"
+	"basin/internal/domain"
 )
 
 // SearchToken represents a parsed query filter.

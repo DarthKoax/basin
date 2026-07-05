@@ -2,12 +2,16 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 
-	"peanutclone/internal/config"
-	"peanutclone/internal/domain"
-	"peanutclone/internal/resolver"
-	"peanutclone/internal/search"
+	"basin/internal/config"
+	"basin/internal/domain"
+	"basin/internal/parser"
+	"basin/internal/resolver"
+	"basin/internal/search"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -27,10 +31,13 @@ const (
 	CommandPaletteMode
 )
 
-// Msg types
 type suggestionMsg struct {
 	suggestions []string
 	err         error
+}
+
+type editorFinishedMsg struct {
+	err error
 }
 
 type browserItem struct {
@@ -39,7 +46,7 @@ type browserItem struct {
 	isFile bool
 	isSnip bool
 	snip   domain.Snippet
-	path   string // Virtual path structure (e.g. "nested/docker")
+	path   string
 }
 
 type command struct {
@@ -48,50 +55,45 @@ type command struct {
 	action      func() tea.Cmd
 }
 
-// AppModel holds the state for the Bubble Tea application.
 type AppModel struct {
-	termWidth    int // terminal width in characters
-	termHeight   int // terminal height in characters
+	termWidth    int
+	termHeight   int
 	mode         tuiMode
 	config       *config.Config
+	strandRoots  []string
 	allSnippets  []domain.Snippet
 	snippetFiles []domain.SnippetFile
 	err          error
 
-	// Shared exits
 	Done         bool
 	FinalSnippet string
 
-	// Finder Mode state
 	finderQuery         textinput.Model
 	finderSelectedIndex int
 	finderScrollOffset  int
-	finderFocusedPanel  int // 0=list, 1=preview
+	finderFocusedPanel  int
 
-	// Browser Mode state
 	browserPath          string
 	browserItems         []browserItem
 	browserSelectedIndex int
 	browserScrollOffset  int
-	browserFocusedPanel  int // 0=list, 1=preview
+	browserFocusedPanel  int
 	browserPreviewScroll int
 
-	// Tags Mode state
 	tags                     []string
 	tagCounts                map[string]int
 	tagsSelectedIndex        int
 	tagsScrollOffset         int
-	tagsFocusedPanel         int // 0=list, 1=preview
+	tagsFocusedPanel         int
 	tagsPreviewScroll        int
 	selectedTag              string
 	tagSnippets              []domain.Snippet
 	tagSnippetsSelectedIndex int
 	tagSnippetsScrollOffset  int
-	tagSnippetsFocusedPanel  int // 0=list, 1=preview
+	tagSnippetsFocusedPanel  int
 	tagSnippetsPreviewScroll int
 	inTagSnippets            bool
 
-	// Wizard Mode state
 	wizardSnippet          domain.Snippet
 	wizardConfirmed        map[string]string
 	wizardVarIndex         int
@@ -102,21 +104,20 @@ type AppModel struct {
 	wizardLoadingSuggs     bool
 	wizardError            error
 
-	// Command Palette state
 	commandPaletteQuery    textinput.Model
 	commandPaletteSelected int
 	commandPaletteCommands []command
 	commandPalettePrevMode tuiMode
 
-	// Preview scroll offsets
 	finderPreviewScroll int
 	wizardPreviewScroll int
+
+	listTopOffset int
 }
 
-// NewAppModel initializes the main Bubble Tea application model.
-func NewAppModel(cfg *config.Config, snippets []domain.Snippet, files []domain.SnippetFile) *AppModel {
+func NewAppModel(cfg *config.Config, roots []string, snippets []domain.Snippet, files []domain.SnippetFile) *AppModel {
 	ti := textinput.New()
-	ti.Placeholder = "Type to search snippets..."
+	ti.Placeholder = "Type to search strands..."
 	ti.Focus()
 
 	wInput := textinput.New()
@@ -129,6 +130,7 @@ func NewAppModel(cfg *config.Config, snippets []domain.Snippet, files []domain.S
 	m := &AppModel{
 		mode:                   FinderMode,
 		config:                 cfg,
+		strandRoots:            roots,
 		allSnippets:            snippets,
 		snippetFiles:           files,
 		finderQuery:            ti,
@@ -136,6 +138,7 @@ func NewAppModel(cfg *config.Config, snippets []domain.Snippet, files []domain.S
 		wizardConfirmed:        make(map[string]string),
 		commandPaletteQuery:    cpInput,
 		commandPaletteSelected: 0,
+		listTopOffset:          4,
 	}
 
 	m.initBrowser()
@@ -149,8 +152,6 @@ func (m *AppModel) Init() tea.Cmd {
 	return textinput.Blink
 }
 
-// Sub-state builders
-
 func (m *AppModel) initBrowser() {
 	m.browserItems = m.getBrowserItemsForPath(m.browserPath)
 	m.browserSelectedIndex = 0
@@ -160,21 +161,16 @@ func (m *AppModel) getBrowserItemsForPath(dir string) []browserItem {
 	var items []browserItem
 	seen := make(map[string]bool)
 
-	// Normalized comparison directory
 	dir = strings.Trim(dir, "/")
 
 	for _, file := range m.snippetFiles {
 		rel := strings.Trim(file.RelativePath, "/")
 
-		// Check if file is in this dir
 		if dir == "" {
-			// Root level
 			idx := strings.Index(rel, "/")
 			if idx == -1 {
-				// File at root
 				items = append(items, browserItem{name: rel, isFile: true, path: rel})
 			} else {
-				// Directory prefix
 				dirPrefix := rel[:idx]
 				if !seen[dirPrefix] {
 					seen[dirPrefix] = true
@@ -182,12 +178,10 @@ func (m *AppModel) getBrowserItemsForPath(dir string) []browserItem {
 				}
 			}
 		} else {
-			// Sub-directory level
 			if strings.HasPrefix(rel, dir+"/") {
 				sub := strings.TrimPrefix(rel, dir+"/")
 				idx := strings.Index(sub, "/")
 				if idx == -1 {
-					// File in this directory
 					items = append(items, browserItem{name: sub, isFile: true, path: dir + "/" + sub})
 				} else {
 					dirPrefix := sub[:idx]
@@ -201,7 +195,6 @@ func (m *AppModel) getBrowserItemsForPath(dir string) []browserItem {
 		}
 	}
 
-	// If the current path points to a file, list the snippets inside that file!
 	for _, file := range m.snippetFiles {
 		rel := strings.Trim(file.RelativePath, "/")
 		if rel == dir {
@@ -296,7 +289,7 @@ func (m *AppModel) initCommands() {
 		},
 		{
 			name:        "Start Wizard",
-			description: "Start the variable wizard for selected snippet",
+			description: "Start the variable wizard for selected strand",
 			action: func() tea.Cmd {
 				var snip domain.Snippet
 				switch m.commandPalettePrevMode {
@@ -324,6 +317,13 @@ func (m *AppModel) initCommands() {
 			},
 		},
 		{
+			name:        "Edit Source File",
+			description: "Open the source markdown file in your editor",
+			action: func() tea.Cmd {
+				return m.openEditorForCurrentStrand()
+			},
+		},
+		{
 			name:        "Quit",
 			description: "Exit the application",
 			action: func() tea.Cmd {
@@ -332,8 +332,6 @@ func (m *AppModel) initCommands() {
 		},
 	}
 }
-
-// Transition to wizard or output
 
 func (m *AppModel) selectSnippet(snip domain.Snippet) tea.Cmd {
 	if len(snip.Placeholders) == 0 {
@@ -358,7 +356,6 @@ func (m *AppModel) setupWizardForCurrentVar() tea.Cmd {
 	p := m.wizardSnippet.Placeholders[m.wizardVarIndex]
 	r := resolver.NewResolver(m.config, m.wizardSnippet, domain.Frontmatter{})
 
-	// Pre-fill default value
 	defVal := r.GetDefaultValue(p)
 	m.wizardInput.SetValue(defVal)
 	m.wizardInput.Placeholder = fmt.Sprintf("Value for %s...", p.Name)
@@ -367,12 +364,9 @@ func (m *AppModel) setupWizardForCurrentVar() tea.Cmd {
 	m.wizardSugSelectedIndex = 0
 	m.wizardError = nil
 
-	// Check if suggestions are command-backed
 	isCmd := p.IsCommand
 
 	if !isCmd {
-		// Lookup in frontmatter or config
-		// (Frontmatter of source file)
 		var sourceFM domain.Frontmatter
 		for _, file := range m.snippetFiles {
 			if file.Path == m.wizardSnippet.SourceFile {
@@ -389,9 +383,7 @@ func (m *AppModel) setupWizardForCurrentVar() tea.Cmd {
 
 	if isCmd {
 		m.wizardLoadingSuggs = true
-		// Run command in background
 		return func() tea.Msg {
-			// Find frontmatter
 			var sourceFM domain.Frontmatter
 			for _, file := range m.snippetFiles {
 				if file.Path == m.wizardSnippet.SourceFile {
@@ -405,7 +397,6 @@ func (m *AppModel) setupWizardForCurrentVar() tea.Cmd {
 		}
 	}
 
-	// Static suggestions or builtins
 	var sourceFM domain.Frontmatter
 	for _, file := range m.snippetFiles {
 		if file.Path == m.wizardSnippet.SourceFile {
@@ -427,7 +418,112 @@ func (m *AppModel) finalizeSnippet(body string) tea.Cmd {
 	return tea.Quit
 }
 
-// Main Update Loop
+func getEditorCommand() (string, []string) {
+	if editor := os.Getenv("VISUAL"); editor != "" {
+		return editor, nil
+	}
+	if editor := os.Getenv("EDITOR"); editor != "" {
+		return editor, nil
+	}
+	switch runtime.GOOS {
+	case "windows":
+		return "notepad", nil
+	default:
+		return "vi", nil
+	}
+}
+
+func (m *AppModel) getSourceFileForCurrentSelection() string {
+	switch m.mode {
+	case FinderMode:
+		filtered := search.FilterSnippets(m.allSnippets, m.finderQuery.Value())
+		if len(filtered) > 0 && m.finderSelectedIndex < len(filtered) {
+			return filtered[m.finderSelectedIndex].SourceFile
+		}
+	case BrowserMode:
+		if len(m.browserItems) > 0 && m.browserSelectedIndex < len(m.browserItems) {
+			item := m.browserItems[m.browserSelectedIndex]
+			if item.isSnip {
+				return item.snip.SourceFile
+			}
+			if item.isFile {
+				for _, f := range m.snippetFiles {
+					rel := strings.Trim(f.RelativePath, "/")
+					if rel == item.path {
+						return f.Path
+					}
+				}
+			}
+		}
+	case TagsMode:
+		if m.inTagSnippets && len(m.tagSnippets) > 0 && m.tagSnippetsSelectedIndex < len(m.tagSnippets) {
+			return m.tagSnippets[m.tagSnippetsSelectedIndex].SourceFile
+		}
+	case WizardMode:
+		return m.wizardSnippet.SourceFile
+	}
+	return ""
+}
+
+func (m *AppModel) openEditorForCurrentStrand() tea.Cmd {
+	filePath := m.getSourceFileForCurrentSelection()
+	if filePath == "" {
+		return nil
+	}
+
+	editorCmd, editorArgs := getEditorCommand()
+	args := append(editorArgs, filePath)
+	c := exec.Command(editorCmd, args...)
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return editorFinishedMsg{err: err}
+	})
+}
+
+func (m *AppModel) reloadStrands() {
+	if len(m.strandRoots) == 0 {
+		return
+	}
+
+	files, err := parser.DiscoverAndParse(m.strandRoots)
+	if err != nil {
+		return
+	}
+
+	var allSnippets []domain.Snippet
+	for _, f := range files {
+		allSnippets = append(allSnippets, f.Snippets...)
+	}
+
+	m.snippetFiles = files
+	m.allSnippets = allSnippets
+
+	m.retainSelectionAfterReload()
+
+	m.initBrowser()
+	m.initTags()
+}
+
+func (m *AppModel) retainSelectionAfterReload() {
+	switch m.mode {
+	case FinderMode:
+		filtered := search.FilterSnippets(m.allSnippets, m.finderQuery.Value())
+		if m.finderSelectedIndex >= len(filtered) {
+			m.finderSelectedIndex = 0
+		}
+	case BrowserMode:
+		m.browserItems = m.getBrowserItemsForPath(m.browserPath)
+		if m.browserSelectedIndex >= len(m.browserItems) {
+			m.browserSelectedIndex = 0
+		}
+	case TagsMode:
+		if m.inTagSnippets && m.selectedTag != "" {
+			m.filterSnippetsByTag(m.selectedTag)
+			if m.tagSnippetsSelectedIndex >= len(m.tagSnippets) {
+				m.tagSnippetsSelectedIndex = 0
+			}
+		}
+	}
+}
 
 func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -454,7 +550,13 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.commandPaletteQuery.Focus()
 				return m, nil
 			}
+		case "ctrl+e":
+			if m.mode != WizardMode && m.mode != CommandPaletteMode {
+				return m, m.openEditorForCurrentStrand()
+			}
 		}
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	case tea.WindowSizeMsg:
 		m.termWidth = msg.Width
 		m.termHeight = msg.Height
@@ -467,9 +569,11 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.wizardSuggestions = msg.suggestions
 		}
 		return m, nil
+	case editorFinishedMsg:
+		m.reloadStrands()
+		return m, nil
 	}
 
-	// Delegate based on mode
 	switch m.mode {
 	case FinderMode:
 		return m.updateFinder(msg)
@@ -483,6 +587,159 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateCommandPalette(msg)
 	}
 
+	return m, nil
+}
+
+func (m *AppModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if msg.Action != tea.MouseActionPress {
+		return m, nil
+	}
+
+	row := msg.Y
+	col := msg.X
+	_, rightWidth, panelHeight := m.panelDims()
+	leftWidth, _, _ := m.panelDims()
+	innerH := m.innerContentHeight(panelHeight)
+
+	switch m.mode {
+	case FinderMode:
+		filtered := search.FilterSnippets(m.allSnippets, m.finderQuery.Value())
+		if col < leftWidth+2 && row >= m.listTopOffset && row < m.listTopOffset+innerH {
+			idx := m.finderScrollOffset + (row - m.listTopOffset)
+			if idx >= 0 && idx < len(filtered) {
+				m.finderSelectedIndex = idx
+				m.finderPreviewScroll = 0
+				m.finderFocusedPanel = 0
+				m.finderQuery.Focus()
+			}
+		} else if col >= leftWidth+2 && row >= m.listTopOffset {
+			m.finderFocusedPanel = 1
+			m.finderQuery.Blur()
+			if msg.Button == tea.MouseButtonWheelUp {
+				m.finderPreviewScroll--
+				if m.finderPreviewScroll < 0 {
+					m.finderPreviewScroll = 0
+				}
+			} else if msg.Button == tea.MouseButtonWheelDown {
+				m.finderPreviewScroll++
+			}
+		}
+		if msg.Button == tea.MouseButtonWheelUp && col < leftWidth+2 {
+			if m.finderSelectedIndex > 0 {
+				m.finderSelectedIndex--
+				m.finderPreviewScroll = 0
+			}
+		} else if msg.Button == tea.MouseButtonWheelDown && col < leftWidth+2 {
+			if m.finderSelectedIndex < len(filtered)-1 {
+				m.finderSelectedIndex++
+				m.finderPreviewScroll = 0
+			}
+		}
+
+	case BrowserMode:
+		if col < leftWidth+2 && row >= m.listTopOffset && row < m.listTopOffset+innerH {
+			idx := m.browserScrollOffset + (row - m.listTopOffset)
+			if idx >= 0 && idx < len(m.browserItems) {
+				m.browserSelectedIndex = idx
+				m.browserPreviewScroll = 0
+				m.browserFocusedPanel = 0
+			}
+		} else if col >= leftWidth+2 {
+			m.browserFocusedPanel = 1
+			if msg.Button == tea.MouseButtonWheelUp {
+				m.browserPreviewScroll--
+				if m.browserPreviewScroll < 0 {
+					m.browserPreviewScroll = 0
+				}
+			} else if msg.Button == tea.MouseButtonWheelDown {
+				m.browserPreviewScroll++
+			}
+		}
+		if msg.Button == tea.MouseButtonWheelUp && col < leftWidth+2 {
+			if m.browserSelectedIndex > 0 {
+				m.browserSelectedIndex--
+				m.browserPreviewScroll = 0
+			}
+		} else if msg.Button == tea.MouseButtonWheelDown && col < leftWidth+2 {
+			if m.browserSelectedIndex < len(m.browserItems)-1 {
+				m.browserSelectedIndex++
+				m.browserPreviewScroll = 0
+			}
+		}
+
+	case TagsMode:
+		if m.inTagSnippets {
+			if col < leftWidth+2 && row >= m.listTopOffset && row < m.listTopOffset+innerH {
+				idx := m.tagSnippetsScrollOffset + (row - m.listTopOffset)
+				if idx >= 0 && idx < len(m.tagSnippets) {
+					m.tagSnippetsSelectedIndex = idx
+					m.tagSnippetsPreviewScroll = 0
+					m.tagSnippetsFocusedPanel = 0
+				}
+			} else if col >= leftWidth+2 {
+				m.tagSnippetsFocusedPanel = 1
+				if msg.Button == tea.MouseButtonWheelUp {
+					m.tagSnippetsPreviewScroll--
+					if m.tagSnippetsPreviewScroll < 0 {
+						m.tagSnippetsPreviewScroll = 0
+					}
+				} else if msg.Button == tea.MouseButtonWheelDown {
+					m.tagSnippetsPreviewScroll++
+				}
+			}
+		} else {
+			if col < leftWidth+2 && row >= m.listTopOffset && row < m.listTopOffset+innerH {
+				idx := m.tagsScrollOffset + (row - m.listTopOffset)
+				if idx >= 0 && idx < len(m.tags) {
+					m.tagsSelectedIndex = idx
+					m.tagsPreviewScroll = 0
+					m.tagsFocusedPanel = 0
+				}
+			} else if col >= leftWidth+2 {
+				m.tagsFocusedPanel = 1
+				if msg.Button == tea.MouseButtonWheelUp {
+					m.tagsPreviewScroll--
+					if m.tagsPreviewScroll < 0 {
+						m.tagsPreviewScroll = 0
+					}
+				} else if msg.Button == tea.MouseButtonWheelDown {
+					m.tagsPreviewScroll++
+				}
+			}
+		}
+
+	case WizardMode:
+		if msg.Button == tea.MouseButtonWheelUp {
+			if col >= leftWidth+2 {
+				m.wizardPreviewScroll--
+				if m.wizardPreviewScroll < 0 {
+					m.wizardPreviewScroll = 0
+				}
+			}
+		} else if msg.Button == tea.MouseButtonWheelDown {
+			if col >= leftWidth+2 {
+				m.wizardPreviewScroll++
+			}
+		}
+
+	case CommandPaletteMode:
+		filtered := m.getFilteredCommands()
+		if row >= m.listTopOffset && row < m.listTopOffset+10 {
+			idx := m.commandPaletteSelected
+			start := m.commandPaletteSelected - 5
+			if start < 0 {
+				start = 0
+			}
+			relRow := row - m.listTopOffset
+			clickedIdx := start + relRow
+			if clickedIdx >= 0 && clickedIdx < len(filtered) {
+				idx = clickedIdx
+				m.commandPaletteSelected = idx
+			}
+		}
+	}
+
+	_ = rightWidth
 	return m, nil
 }
 
@@ -855,8 +1112,6 @@ func (m *AppModel) getFilteredCommands() []command {
 	return filtered
 }
 
-// Rendering Views
-
 var (
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -889,22 +1144,39 @@ var (
 				Italic(true).
 				Foreground(lipgloss.Color("#888888"))
 
+	basinGlamourStyle = func() glamour.TermRendererOption {
+		s := glamourStyles.DarkStyleConfig
+		codeBlockBg := "#262626"
+		codeBlockFg := "#C9C9C9"
+		s.CodeBlock.BackgroundColor = &codeBlockBg
+		s.CodeBlock.Color = &codeBlockFg
+		zeroMargin := uint(0)
+		s.CodeBlock.Margin = &zeroMargin
+		inlineCodeBg := "#303030"
+		inlineCodeFg := "#E5C07B"
+		s.Code.BackgroundColor = &inlineCodeBg
+		s.Code.Color = &inlineCodeFg
+		return glamour.WithStyles(s)
+	}
+
 	mdRenderer, _ = glamour.NewTermRenderer(
-		glamour.WithStyles(glamourStyles.DarkStyleConfig),
+		basinGlamourStyle(),
 		glamour.WithWordWrap(0),
 	)
 )
 
-// panelDims returns the dimensions for the left and right panels, reserving
-// room for the header region (title + instructions + search input = 3 rows).
 func (m *AppModel) panelDims() (leftWidth, rightWidth, height int) {
 	const headerRows = 3
-	availHeight := m.termHeight - headerRows
+	const footerRows = 1
+	availHeight := m.termHeight - headerRows - footerRows
 	if availHeight < 1 {
-		availHeight = 10
+		availHeight = 1
 	}
 	height = availHeight * m.config.Panel.HeightPercent / 105
 	if height < 1 {
+		height = 1
+	}
+	if height > availHeight {
 		height = availHeight
 	}
 
@@ -1002,7 +1274,7 @@ func renderScrollbar(totalLines, scrollOffset, visibleHeight, panelHeight int) s
 
 func (m *AppModel) View() string {
 	if m.Done {
-		return fmt.Sprintf("Snippet copied to clipboard!\n\n%s\n", m.FinalSnippet)
+		return fmt.Sprintf("Strand copied to clipboard!\n\n%s\n", m.FinalSnippet)
 	}
 
 	var sb strings.Builder
@@ -1033,7 +1305,7 @@ func (m *AppModel) View() string {
 func (m *AppModel) renderHeader() string {
 	var sb strings.Builder
 
-	sb.WriteString(titleStyle.Render("PEANUTCLONE") + " ")
+	sb.WriteString(titleStyle.Render("BASIN") + " ")
 
 	switch m.mode {
 	case FinderMode:
@@ -1064,28 +1336,28 @@ func (m *AppModel) renderFooter() string {
 	switch m.mode {
 	case FinderMode:
 		if m.finderFocusedPanel == 0 {
-			instructions = "Enter: wizard  Tab: focus preview  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+			instructions = "Enter: wizard  Tab: focus preview  Ctrl+E: edit  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
 		} else {
-			instructions = "Tab/Esc/Left: back to list  Ctrl+C: wizard  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+			instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
 		}
 	case BrowserMode:
 		if m.browserFocusedPanel == 0 {
-			instructions = "Enter: open/wizard  Ctrl+C: wizard  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+			instructions = "Enter: open/wizard  Ctrl+E: edit  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
 		} else {
-			instructions = "Tab/Esc/Left: back to list  Ctrl+C: wizard  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+			instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
 		}
 	case TagsMode:
 		if m.inTagSnippets {
 			if m.tagSnippetsFocusedPanel == 0 {
-				instructions = "Enter: wizard  Ctrl+C: wizard  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+				instructions = "Enter: wizard  Ctrl+E: edit  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
 			} else {
-				instructions = "Tab/Esc/Left: back to list  Ctrl+C: wizard  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
 			}
 		} else {
 			if m.tagsFocusedPanel == 0 {
-				instructions = "Enter: open  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+				instructions = "Enter: open  Ctrl+E: edit  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
 			} else {
-				instructions = "Tab/Esc/Left: back to list  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
 			}
 		}
 	case WizardMode:
@@ -1145,7 +1417,6 @@ func (m *AppModel) renderCommandPalette() string {
 	return sb.String()
 }
 
-// renderSnippetPreview builds the markdown preview for a specific snipped, used as the right panel during wizard.
 func (m *AppModel) renderSnippetPreview(snip domain.Snippet) string {
 	var md strings.Builder
 	md.WriteString("# " + snip.Name + "\n\n")
@@ -1170,7 +1441,6 @@ func (m *AppModel) renderSnippetPreview(snip domain.Snippet) string {
 	return renderedMD
 }
 
-// renderWizardBar builds a compact single-line wizard form for the header.
 func (m *AppModel) renderWizardBar() string {
 	p := m.wizardSnippet.Placeholders[m.wizardVarIndex]
 	var bar strings.Builder
@@ -1265,7 +1535,6 @@ func (m *AppModel) renderWizardPreview() string {
 	return renderedMD
 }
 
-// renderMainPanels builds the left/right pane view used by Finder and as background for Wizard.
 func (m *AppModel) renderMainPanels() string {
 	filtered := search.FilterSnippets(m.allSnippets, m.finderQuery.Value())
 
@@ -1290,7 +1559,7 @@ func (m *AppModel) renderMainPanels() string {
 
 	leftScrollbar := renderScrollbar(len(listLines), m.finderScrollOffset, innerH, panelHeight)
 
-	previewContent := "No snippet selected."
+	previewContent := "No strand selected."
 	var previewScrollbar string
 	if m.mode == WizardMode {
 		rendered := m.renderWizardPreview()
@@ -1396,7 +1665,7 @@ func (m *AppModel) renderBrowserPanels() string {
 
 	leftScrollbar := renderScrollbar(len(listLines), m.browserScrollOffset, innerH, panelHeight)
 
-	previewContent := "No snippet selected."
+	previewContent := "No strand selected."
 	var previewScrollbar string
 	if len(m.browserItems) > 0 && m.browserSelectedIndex < len(m.browserItems) {
 		item := m.browserItems[m.browserSelectedIndex]
@@ -1476,12 +1745,12 @@ func (m *AppModel) renderTagsPanels() string {
 		visibleListLines := clipLines(listLines, m.tagSnippetsScrollOffset, innerH)
 		listContent = strings.Join(visibleListLines, "\n")
 		if listContent == "" {
-			listContent = "  No snippets in tag."
+			listContent = "  No strands in tag."
 		}
 
 		listScrollbar = renderScrollbar(len(listLines), m.tagSnippetsScrollOffset, innerH, panelHeight)
 
-		previewContent = "No snippet selected."
+		previewContent = "No strand selected."
 		if len(m.tagSnippets) > 0 && m.tagSnippetsSelectedIndex < len(m.tagSnippets) {
 			rendered := m.renderSnippetPreview(m.tagSnippets[m.tagSnippetsSelectedIndex])
 			previewLines := strings.Split(rendered, "\n")
@@ -1517,11 +1786,11 @@ func (m *AppModel) renderTagsPanels() string {
 
 		listScrollbar = renderScrollbar(len(listLines), m.tagsScrollOffset, innerH, panelHeight)
 
-		previewContent = "Select a tag to see snippets."
+		previewContent = "Select a tag to see strands."
 		if len(m.tags) > 0 && m.tagsSelectedIndex < len(m.tags) {
 			tag := m.tags[m.tagsSelectedIndex]
 			count := m.tagCounts[tag]
-			previewContent = fmt.Sprintf("# %s\n\n**%d snippets**\n\nSelect this tag to browse its snippets.", tag, count)
+			previewContent = fmt.Sprintf("# %s\n\n**%d strands**\n\nSelect this tag to browse its strands.", tag, count)
 			rendered, _ := mdRenderer.Render(previewContent)
 			previewLines := strings.Split(rendered, "\n")
 

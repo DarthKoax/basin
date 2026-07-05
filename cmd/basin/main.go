@@ -9,24 +9,23 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
-	"peanutclone/internal/config"
-	"peanutclone/internal/domain"
-	"peanutclone/internal/parser"
-	"peanutclone/internal/tui"
+	"basin/internal/config"
+	"basin/internal/domain"
+	"basin/internal/parser"
+	"basin/internal/tui"
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "pb",
-	Short: "peanutclone - a Go clone of the peanutbutter snippet manager",
+	Use:   "basin",
+	Short: "Basin - interactive terminal strand manager",
 	Run: func(cmd *cobra.Command, args []string) {
-		// Default behavior: execute finder TUI
 		runExecute()
 	},
 }
 
 var executeCmd = &cobra.Command{
 	Use:   "execute",
-	Short: "Run the interactive terminal snippet selector",
+	Short: "Run the interactive terminal strand selector",
 	Run: func(cmd *cobra.Command, args []string) {
 		runExecute()
 	},
@@ -34,7 +33,7 @@ var executeCmd = &cobra.Command{
 
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Scaffold starter snippet directories and files",
+	Short: "Scaffold starter strand directories and files",
 	Run: func(cmd *cobra.Command, args []string) {
 		runInit()
 	},
@@ -42,7 +41,7 @@ var initCmd = &cobra.Command{
 
 var lintCmd = &cobra.Command{
 	Use:   "lint",
-	Short: "Check configured snippet files for syntax and variable errors",
+	Short: "Check configured strand files for syntax and variable errors",
 	Run: func(cmd *cobra.Command, args []string) {
 		runLint()
 	},
@@ -64,11 +63,9 @@ func main() {
 func getSnippetRoots(cfg *config.Config) []string {
 	var roots []string
 
-	// 1. Config paths
 	roots = append(roots, cfg.Paths.Snippets...)
 
-	// 2. PEANUTBUTTER_PATH env var
-	envPath := os.Getenv("PEANUTBUTTER_PATH")
+	envPath := os.Getenv("BASIN_PATH")
 	if envPath != "" {
 		separator := ":"
 		if filepath.Separator == '\\' {
@@ -83,14 +80,12 @@ func getSnippetRoots(cfg *config.Config) []string {
 		}
 	}
 
-	// 3. XDG default path (~/.config/peanutbutter/snippets/)
 	home, err := os.UserHomeDir()
 	if err == nil {
-		xdgPath := filepath.Join(home, ".config", "peanutbutter", "snippets")
+		xdgPath := filepath.Join(home, ".config", "basin", "strands")
 		roots = append(roots, xdgPath)
 	}
 
-	// Deduplicate and filter existing directories
 	seen := make(map[string]bool)
 	var finalRoots []string
 	for _, root := range roots {
@@ -100,7 +95,6 @@ func getSnippetRoots(cfg *config.Config) []string {
 		}
 		if !seen[abs] {
 			seen[abs] = true
-			// Check if directory exists
 			if info, err := os.Stat(abs); err == nil && info.IsDir() {
 				finalRoots = append(finalRoots, abs)
 			}
@@ -119,13 +113,13 @@ func runExecute() {
 
 	roots := getSnippetRoots(cfg)
 	if len(roots) == 0 {
-		fmt.Fprintln(os.Stderr, "No snippet directories found. Run 'pb init' to create a starter layout.")
+		fmt.Fprintln(os.Stderr, "No strand directories found. Run 'basin init' to create a starter layout.")
 		os.Exit(1)
 	}
 
 	files, err := parser.DiscoverAndParse(roots)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing snippets: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error parsing strands: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -135,12 +129,12 @@ func runExecute() {
 	}
 
 	if len(allSnippets) == 0 {
-		fmt.Fprintln(os.Stderr, "No snippets found in configured directories. Add markdown snippets with level-2 headings '##' and code blocks.")
+		fmt.Fprintln(os.Stderr, "No strands found in configured directories. Add markdown strands with level-2 headings '##' and code blocks.")
 		os.Exit(1)
 	}
 
-	m := tui.NewAppModel(cfg, allSnippets, files)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	m := tui.NewAppModel(cfg, roots, allSnippets, files)
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	finalModel, err := p.Run()
 	if err != nil {
@@ -150,7 +144,6 @@ func runExecute() {
 
 	appModel := finalModel.(*tui.AppModel)
 	if appModel.Done {
-		// Output the finalized snippet to stdout so it can be captured by terminal wrappers
 		fmt.Print(appModel.FinalSnippet)
 	}
 }
@@ -162,20 +155,20 @@ func runInit() {
 		os.Exit(1)
 	}
 
-	snippetsDir := filepath.Join(home, ".config", "peanutbutter", "snippets")
-	if err := os.MkdirAll(snippetsDir, 0755); err != nil {
+	strandsDir := filepath.Join(home, ".config", "basin", "strands")
+	if err := os.MkdirAll(strandsDir, 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating directory: %v\n", err)
 		os.Exit(1)
 	}
 
-	snippetsFile := filepath.Join(snippetsDir, "snippets.md")
-	if _, err := os.Stat(snippetsFile); err == nil {
-		fmt.Printf("Snippets file already exists at %s\n", snippetsFile)
+	strandsFile := filepath.Join(strandsDir, "strands.md")
+	if _, err := os.Stat(strandsFile); err == nil {
+		fmt.Printf("Strands file already exists at %s\n", strandsFile)
 		return
 	}
 
 	starterContent := `---
-name: Starter Snippets
+name: Starter Strands
 tags: [starter, example]
 ---
 
@@ -196,19 +189,18 @@ curl -X POST -H "Content-Type: application/json" -d '<@json_body>' <@url>
 ` + "```" + `
 `
 
-	if err := os.WriteFile(snippetsFile, []byte(starterContent), 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "Error writing starter snippets: %v\n", err)
+	if err := os.WriteFile(strandsFile, []byte(starterContent), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing starter strands: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Scaffold empty config file if not exists
-	configDir := filepath.Join(home, ".config", "peanutbutter")
+	configDir := filepath.Join(home, ".config", "basin")
 	configFile := filepath.Join(configDir, "config.toml")
 	if _, err := os.Stat(configFile); os.IsNotExist(err) {
-		starterConfig := `# Peanutbutter configuration TOML
+		starterConfig := `# Basin configuration TOML
 
 [paths]
-# snippets = ["/path/to/my/extra/snippets"]
+# strands = ["/path/to/my/extra/strands"]
 
 [suggestion_commands]
 timeout_ms = 2000
@@ -217,7 +209,7 @@ allow_commands = true
 		_ = os.WriteFile(configFile, []byte(starterConfig), 0644)
 	}
 
-	fmt.Printf("Initialized successfully! Scaffolding completed at:\n- %s\n- %s\n", snippetsFile, configFile)
+	fmt.Printf("Initialized successfully! Scaffolding completed at:\n- %s\n- %s\n", strandsFile, configFile)
 }
 
 func runLint() {
@@ -229,7 +221,7 @@ func runLint() {
 
 	roots := getSnippetRoots(cfg)
 	if len(roots) == 0 {
-		fmt.Fprintln(os.Stderr, "No snippet roots configured.")
+		fmt.Fprintln(os.Stderr, "No strand roots configured.")
 		os.Exit(1)
 	}
 
@@ -241,26 +233,21 @@ func runLint() {
 
 	findings := 0
 	for _, f := range files {
-		// Basic lint checks
-		// 1. Check for duplicate names
 		seenNames := make(map[string]bool)
 		for _, snip := range f.Snippets {
 			if seenNames[snip.Name] {
-				fmt.Printf("%s: error: duplicate snippet name %q\n", f.Path, snip.Name)
+				fmt.Printf("%s: error: duplicate strand name %q\n", f.Path, snip.Name)
 				findings++
 			}
 			seenNames[snip.Name] = true
 
-			// 2. Check for dependent variable reference ordering
 			orderMap := make(map[string]int)
 			for idx, p := range snip.Placeholders {
 				orderMap[p.Name] = idx
 			}
 
-			// Parse command templates to check references
 			for _, p := range snip.Placeholders {
 				if p.IsCommand {
-					// Extract <#name>
 					re := regexp.MustCompile(`<#([a-zA-Z0-9_-]+)>`)
 					matches := re.FindAllStringSubmatch(p.Command, -1)
 					for _, match := range matches {
