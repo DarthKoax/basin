@@ -86,11 +86,11 @@ func ParseFile(path string, rootDir string, reader io.Reader) (*domain.SnippetFi
 
 	// Parsing state machine
 	type parsedRawSnippet struct {
-		name        string
-		descLines   []string
-		bodyLines   []string
-		language    string
-		hasBody     bool
+		name      string
+		descLines []string
+		bodyLines []string
+		language  string
+		hasBody   bool
 	}
 
 	var rawSnippets []*parsedRawSnippet

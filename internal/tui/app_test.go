@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -10,10 +11,23 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// Test that entering wizard mode renders the overlay while keeping background panels.
-func TestWizardOverlayDisplaysBackground(t *testing.T) {
-	cfg := &config.Config{}
-	snip := domain.Snippet{
+var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func stripANSI(s string) string {
+	return ansiRE.ReplaceAllString(s, "")
+}
+
+func viewContains(view, needle string) bool {
+	return strings.Contains(stripANSI(view), needle)
+}
+
+func viewHasSideBySide(view string) bool {
+	clean := stripANSI(view)
+	return strings.Contains(clean, "┐│┌") || strings.Contains(clean, "┐ │ ┌")
+}
+
+func newTestSnippet() domain.Snippet {
+	return domain.Snippet{
 		Name:         "test-snippet",
 		RelativePath: "test.md",
 		Description:  "A test snippet",
@@ -21,28 +35,141 @@ func TestWizardOverlayDisplaysBackground(t *testing.T) {
 		Language:     "sh",
 		Placeholders: []domain.Placeholder{{Name: "var", IsCommand: false}},
 	}
+}
+
+func newTestModelWithWizard(cfg *config.Config, termWidth, termHeight int) *AppModel {
+	snip := newTestSnippet()
 	snippets := []domain.Snippet{snip}
 	files := []domain.SnippetFile{}
 	m := NewAppModel(cfg, snippets, files)
-	// Simulate entering wizard mode directly.
 	m.mode = WizardMode
 	m.wizardSnippet = snip
 	m.wizardVarIndex = 0
 	m.wizardConfirmed = make(map[string]string)
-	// Set a reasonable terminal size.
-	m.termWidth = 100
-	m.termHeight = 40
-	// Render view.
+	m.termWidth = termWidth
+	m.termHeight = termHeight
+	return m
+}
+
+// Test that entering wizard mode renders both the wizard panel and the markdown preview.
+func TestWizardOverlayDisplaysBackground(t *testing.T) {
+	cfg := config.DefaultConfig()
+	m := newTestModelWithWizard(cfg, 120, 40)
 	view := m.View()
-	if !strings.Contains(view, "test-snippet") {
-		t.Fatalf("expected background to contain snippet name, got: %s", view)
+	if !viewContains(view, "A test snippet") {
+		t.Fatalf("expected preview to contain snippet description, got: %s", view)
 	}
-	if !strings.Contains(view, "Variable: var") {
+	if !viewContains(view, "Variable: var") {
 		t.Fatalf("expected wizard overlay to contain variable prompt, got: %s", view)
 	}
-	// Ensure overlay markers are present (border characters)
-	if !strings.Contains(view, "┌") && !strings.Contains(view, "│") {
-		t.Fatalf("expected overlay borders in view, got: %s", view)
+	if !viewContains(view, "┌") && !viewContains(view, "│") {
+		t.Fatalf("expected panel borders in view, got: %s", view)
+	}
+}
+
+// Test that wizard position "right" renders the preview on the left and wizard on the right.
+func TestWizardPositionRight(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Panel.Position = "right"
+	cfg.Panel.WidthPercent = 60
+	m := newTestModelWithWizard(cfg, 160, 40)
+	view := m.View()
+
+	if !viewContains(view, "test-snippet") {
+		t.Fatal("expected preview to contain snippet name in wizard right position")
+	}
+	if !viewContains(view, "Variable: var") {
+		t.Fatal("expected wizard panel to be visible in wizard right position")
+	}
+	if !viewContains(view, "Fill Template") {
+		t.Fatal("expected wizard instructions in view")
+	}
+	if !viewHasSideBySide(view) {
+		t.Fatalf("expected preview and wizard to render side by side for position 'right'\n%s", view)
+	}
+}
+
+// Test that wizard position "left" renders the wizard on the left and preview on the right.
+func TestWizardPositionLeft(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Panel.Position = "left"
+	cfg.Panel.WidthPercent = 60
+	m := newTestModelWithWizard(cfg, 160, 40)
+	view := m.View()
+
+	if !viewContains(view, "test-snippet") {
+		t.Fatal("expected preview to contain snippet name in wizard left position")
+	}
+	if !viewContains(view, "Variable: var") {
+		t.Fatal("expected wizard panel to be visible in wizard left position")
+	}
+	if !viewHasSideBySide(view) {
+		t.Fatalf("expected wizard and preview to render side by side for position 'left'\n%s", view)
+	}
+}
+
+// Test that wizard position "bottom" renders the wizard below the main panels.
+func TestWizardPositionBottom(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Panel.Position = "bottom"
+	cfg.Panel.HeightPercent = 50
+	m := newTestModelWithWizard(cfg, 120, 50)
+	view := m.View()
+
+	if !viewContains(view, "A test snippet") {
+		t.Fatal("expected preview to be visible in wizard bottom position")
+	}
+	if !viewContains(view, "Variable: var") {
+		t.Fatal("expected wizard panel to be visible in wizard bottom position")
+	}
+
+	lines := strings.Split(view, "\n")
+	previewLineIdx := -1
+	wizardLineIdx := -1
+	for i, line := range lines {
+		clean := stripANSI(line)
+		if strings.Contains(clean, "A test snippet") && previewLineIdx == -1 {
+			previewLineIdx = i
+		}
+		if strings.Contains(clean, "Variable: var") && wizardLineIdx == -1 {
+			wizardLineIdx = i
+		}
+	}
+	if previewLineIdx == -1 || wizardLineIdx == -1 {
+		t.Fatal("expected both preview and wizard content in view")
+	}
+	if wizardLineIdx <= previewLineIdx {
+		t.Fatal("expected wizard panel to appear below preview for position 'bottom'")
+	}
+}
+
+// Test that custom width percentages affect the wizard panel sizing.
+func TestWizardResizableWidth(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Panel.Position = "left"
+	cfg.Panel.WidthPercent = 75
+	m := newTestModelWithWizard(cfg, 160, 40)
+	view := m.View()
+
+	if !viewContains(view, "Variable: var") {
+		t.Fatal("expected wizard panel content with custom width")
+	}
+	if !viewContains(view, "A test snippet") {
+		t.Fatal("expected preview content with custom width")
+	}
+}
+
+// Test that the finder header and search input are visible when wizard is open.
+func TestWizardShowsFinderHeader(t *testing.T) {
+	cfg := config.DefaultConfig()
+	m := newTestModelWithWizard(cfg, 160, 40)
+	view := m.View()
+
+	if !strings.Contains(view, "PEANUTCLONE") {
+		t.Fatal("expected header title in wizard view")
+	}
+	if !strings.Contains(view, "Ctrl+T") || !strings.Contains(view, "Enter: pick") {
+		t.Fatal("expected finder instructions in wizard view")
 	}
 }
 
@@ -80,7 +207,7 @@ func TestWizardSelectPlaceholder_SuggestionsRendered(t *testing.T) {
 	m.wizardSnippet = snip
 	m.wizardVarIndex = 0
 	m.wizardConfirmed = make(map[string]string)
-	m.termWidth = 100
+	m.termWidth = 160
 	m.termHeight = 40
 
 	// Trigger wizard setup to load suggestions
@@ -154,7 +281,7 @@ func TestWizardSelect_NavigateSuggestions(t *testing.T) {
 	m.wizardSnippet = snip
 	m.wizardVarIndex = 0
 	m.wizardConfirmed = make(map[string]string)
-	m.termWidth = 100
+	m.termWidth = 160
 	m.termHeight = 40
 
 	// Load suggestions
@@ -220,7 +347,7 @@ func TestWizardSelect_ConfirmAndAdvance(t *testing.T) {
 	m.wizardSnippet = snip
 	m.wizardVarIndex = 0
 	m.wizardConfirmed = make(map[string]string)
-	m.termWidth = 100
+	m.termWidth = 160
 	m.termHeight = 40
 
 	// Load suggestions for first variable (METHOD)
@@ -289,7 +416,7 @@ func TestWizardSelect_FullRenderConfirmCopiesSnippet(t *testing.T) {
 	m.wizardSnippet = snip
 	m.wizardVarIndex = 0
 	m.wizardConfirmed = make(map[string]string)
-	m.termWidth = 100
+	m.termWidth = 160
 	m.termHeight = 40
 
 	// First variable: select POST (press down once, then enter)
