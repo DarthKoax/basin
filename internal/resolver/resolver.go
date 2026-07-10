@@ -14,7 +14,19 @@ import (
 	"basin/internal/domain"
 )
 
-var dependentRegex = regexp.MustCompile(`(\\)?<#([a-zA-Z0-9_-]+)(:raw)?>`)
+var (
+	dependentRegex  = regexp.MustCompile(`(\\)?<#([a-zA-Z0-9_-]+)(:raw)?>`)
+	cmdSuggestionRe = regexp.MustCompile(`^\$\((.+)\)$`)
+)
+
+// isCmdSuggestion checks if a string is a $(...) command-backed suggestion.
+func isCmdSuggestion(s string) (string, bool) {
+	m := cmdSuggestionRe.FindStringSubmatch(s)
+	if len(m) == 2 {
+		return m[1], true
+	}
+	return "", false
+}
 
 // Resolver orchestrates default value and suggestion lookup for a snippet's placeholders.
 type Resolver struct {
@@ -92,18 +104,14 @@ func ResolveCommandTemplate(template string, confirmed map[string]string, bounda
 }
 
 // GetDefaultValue returns the resolved default value for a placeholder.
+// Priority: Placeholder fields (populated from frontmatter by parser) → Config.
 func (r *Resolver) GetDefaultValue(p domain.Placeholder) string {
-	// 1. Inline default
+	// 1. Placeholder fields, populated from file-local frontmatter by the parser
 	if p.IsDefault {
 		return p.DefaultValue
 	}
 
-	// 2. File-local frontmatter spec
-	if fmVar, ok := r.Frontmatter.Variables[p.Name]; ok && fmVar.Default != nil {
-		return *fmVar.Default
-	}
-
-	// 3. Config-defined spec
+	// 2. Config-defined spec
 	if cfgVar, ok := r.Config.Variables[p.Name]; ok && cfgVar.Default != nil {
 		return *cfgVar.Default
 	}
@@ -112,51 +120,43 @@ func (r *Resolver) GetDefaultValue(p domain.Placeholder) string {
 }
 
 // GetSuggestions resolves static or command-backed suggestions for a placeholder.
+// Priority: Placeholder fields (populated from frontmatter by parser) → Config → Built-ins.
 func (r *Resolver) GetSuggestions(p domain.Placeholder, confirmed map[string]string) ([]string, error) {
-	// Priority 0: Inline pipe-separated select options take highest precedence
-	if p.IsSelect && len(p.SelectOptions) > 0 {
-		return p.SelectOptions, nil
-	}
-
-	// Determine the source of suggestions (command or static list)
+	// Priority 1: Placeholder fields, populated from file-local frontmatter by the parser
 	var commandStr string
 	var staticList []string
 	hasCommand := false
 	hasStatic := false
 
-	// Priority 1: Inline command source
 	if p.IsCommand {
 		commandStr = p.Command
 		hasCommand = true
-	}
-
-	// Priority 2: File-local frontmatter spec
-	if !hasCommand {
-		if fmVar, ok := r.Frontmatter.Variables[p.Name]; ok {
-			if fmVar.Command != "" {
-				commandStr = fmVar.Command
-				hasCommand = true
-			} else if len(fmVar.Suggestions) > 0 {
-				staticList = fmVar.Suggestions
-				hasStatic = true
-			}
+	} else if p.IsSelect && len(p.SelectOptions) > 0 {
+		// Check for $(...) command-backed suggestion
+		if cmd, ok := isCmdSuggestion(p.SelectOptions[0]); ok {
+			return r.runSuggestionCommand(cmd, confirmed)
 		}
+		return p.SelectOptions, nil
 	}
 
-	// Priority 3: Config-defined spec
+	// Priority 2: Config-defined spec (if not already resolved from frontmatter)
 	if !hasCommand && !hasStatic {
 		if cfgVar, ok := r.Config.Variables[p.Name]; ok {
 			if cfgVar.Command != "" {
 				commandStr = cfgVar.Command
 				hasCommand = true
 			} else if len(cfgVar.Suggestions) > 0 {
+				// Check for $(...) command-backed suggestion
+				if cmd, ok := isCmdSuggestion(cfgVar.Suggestions[0]); ok {
+					return r.runSuggestionCommand(cmd, confirmed)
+				}
 				staticList = cfgVar.Suggestions
 				hasStatic = true
 			}
 		}
 	}
 
-	// Priority 4: Built-in suggestions (file / directory)
+	// Priority 3: Built-in suggestions (file / directory)
 	if !hasCommand && !hasStatic {
 		if p.Name == "file" {
 			return listFilesAndDirs(false)
@@ -171,40 +171,44 @@ func (r *Resolver) GetSuggestions(p domain.Placeholder, confirmed map[string]str
 	}
 
 	if hasCommand {
-		if !r.Config.SuggestionCommands.AllowCommands {
-			return nil, nil // Commands are disabled globally
-		}
-
-		// Interpolate dependent variables
-		resolvedCmd, err := ResolveCommandTemplate(commandStr, confirmed, r.Snippet.Boundaries)
-		if err != nil {
-			return nil, fmt.Errorf("resolving command template: %w", err)
-		}
-
-		// Run suggestion command in bash
-		timeout := time.Duration(r.Config.SuggestionCommands.TimeoutMS) * time.Millisecond
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-
-		cmd := exec.CommandContext(ctx, "bash", "-c", resolvedCmd)
-		outputBytes, err := cmd.Output()
-		if err != nil {
-			return nil, fmt.Errorf("executing suggestion command %q: %w", resolvedCmd, err)
-		}
-
-		output := string(outputBytes)
-		rawLines := strings.Split(output, "\n")
-		var suggestions []string
-		for _, line := range rawLines {
-			line = strings.TrimSpace(line)
-			if line != "" {
-				suggestions = append(suggestions, line)
-			}
-		}
-		return suggestions, nil
+		return r.runSuggestionCommand(commandStr, confirmed)
 	}
 
 	return nil, nil
+}
+
+// runSuggestionCommand executes a bash command and returns its output lines as suggestions.
+// Dependent variables (<#name>, <#name:raw>) are interpolated before execution.
+func (r *Resolver) runSuggestionCommand(commandStr string, confirmed map[string]string) ([]string, error) {
+	if !r.Config.SuggestionCommands.AllowCommands {
+		return nil, nil
+	}
+
+	resolvedCmd, err := ResolveCommandTemplate(commandStr, confirmed, r.Snippet.Boundaries)
+	if err != nil {
+		return nil, fmt.Errorf("resolving command template: %w", err)
+	}
+
+	timeout := time.Duration(r.Config.SuggestionCommands.TimeoutMS) * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bash", "-c", resolvedCmd)
+	outputBytes, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("executing suggestion command %q: %w", resolvedCmd, err)
+	}
+
+	output := string(outputBytes)
+	rawLines := strings.Split(output, "\n")
+	var suggestions []string
+	for _, line := range rawLines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			suggestions = append(suggestions, line)
+		}
+	}
+	return suggestions, nil
 }
 
 // RenderSnippet substitutes confirmed values into the snippet body.
@@ -252,7 +256,7 @@ func (r *Resolver) RenderSnippet(confirmed map[string]string) string {
 	for _, ph := range r.Snippet.Placeholders {
 		phMap[ph.Name] = ph
 	}
-	envPattern := openEsc + `[@$]([A-Za-z0-9_-]+)(?::(?:\?[^` + closeEsc + `]*|[^` + closeEsc + `]+))?` + closeEsc
+	envPattern := openEsc + `[@$]([A-Za-z0-9_-]+)` + closeEsc
 	envRe := regexp.MustCompile(envPattern)
 	body = envRe.ReplaceAllStringFunc(body, func(m string) string {
 		name := envRe.FindStringSubmatch(m)[1]

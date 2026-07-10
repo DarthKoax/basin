@@ -8,6 +8,8 @@ import (
 	"basin/internal/domain"
 )
 
+func strPtr(s string) *string { return &s }
+
 func TestShellQuote(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -62,33 +64,25 @@ func TestResolver_GetDefaultValue(t *testing.T) {
 		Default: &devDefault,
 	}
 
-	fm := domain.Frontmatter{
-		Variables: make(map[string]domain.VariableSpec),
-	}
-	stageDefault := "stage"
-	fm.Variables["port"] = domain.VariableSpec{
-		Default: &stageDefault,
-	}
-
 	snip := domain.Snippet{}
-	r := NewResolver(cfg, snip, fm)
+	r := NewResolver(cfg, snip, domain.Frontmatter{})
 
-	// Test Inline
-	inlinePlaceholder := domain.Placeholder{Name: "host", IsDefault: true, DefaultValue: "localhost"}
-	if val := r.GetDefaultValue(inlinePlaceholder); val != "localhost" {
-		t.Errorf("expected inline default localhost, got %q", val)
+	// Test Placeholder field (populated from frontmatter by parser)
+	fmPlaceholder := domain.Placeholder{Name: "port", IsDefault: true, DefaultValue: "3000"}
+	if val := r.GetDefaultValue(fmPlaceholder); val != "3000" {
+		t.Errorf("expected placeholder default 3000, got %q", val)
 	}
 
-	// Test Frontmatter
-	fmPlaceholder := domain.Placeholder{Name: "port"}
-	if val := r.GetDefaultValue(fmPlaceholder); val != "stage" {
-		t.Errorf("expected frontmatter default stage, got %q", val)
-	}
-
-	// Test Config
+	// Test Config fallback
 	cfgPlaceholder := domain.Placeholder{Name: "environment"}
 	if val := r.GetDefaultValue(cfgPlaceholder); val != "dev" {
 		t.Errorf("expected config default dev, got %q", val)
+	}
+
+	// Test no default
+	noDefault := domain.Placeholder{Name: "missing"}
+	if val := r.GetDefaultValue(noDefault); val != "" {
+		t.Errorf("expected empty default, got %q", val)
 	}
 }
 
@@ -98,17 +92,14 @@ func TestResolver_GetSuggestions_Static(t *testing.T) {
 		Suggestions: []string{"us-east-1", "us-west-2"},
 	}
 
-	fm := domain.Frontmatter{
-		Variables: make(map[string]domain.VariableSpec),
-	}
-	fm.Variables["env"] = domain.VariableSpec{
-		Suggestions: []string{"dev", "prod"},
-	}
+	r := NewResolver(cfg, domain.Snippet{}, domain.Frontmatter{})
 
-	r := NewResolver(cfg, domain.Snippet{}, fm)
-
-	// Test frontmatter static suggestions
-	pEnv := domain.Placeholder{Name: "env"}
+	// Test Placeholder field (populated from frontmatter by parser)
+	pEnv := domain.Placeholder{
+		Name:          "env",
+		IsSelect:      true,
+		SelectOptions: []string{"dev", "prod"},
+	}
 	suggs, err := r.GetSuggestions(pEnv, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -130,10 +121,14 @@ func TestResolver_GetSuggestions_Static(t *testing.T) {
 
 func TestResolver_GetSuggestions_Command(t *testing.T) {
 	cfg := config.DefaultConfig()
+	cfg.Variables["cmd_var"] = domain.VariableSpec{
+		Command: "echo -e 'line1\\nline2'",
+		Default: strPtr("line1"),
+	}
 	r := NewResolver(cfg, domain.Snippet{}, domain.Frontmatter{})
 
-	// Test command execution
-	pCmd := domain.Placeholder{Name: "cmd_var", IsCommand: true, Command: "echo -e 'line1\\nline2'"}
+	// Test command execution via config
+	pCmd := domain.Placeholder{Name: "cmd_var"}
 	suggs, err := r.GetSuggestions(pCmd, nil)
 	if err != nil {
 		t.Fatalf("unexpected error running command: %v", err)
@@ -189,20 +184,11 @@ func TestResolver_GetSuggestions_Builtins(t *testing.T) {
 	}
 }
 
-func TestResolver_GetSuggestions_SelectOptions(t *testing.T) {
+func TestResolver_GetSuggestions_SelectFromFrontmatter(t *testing.T) {
 	cfg := config.DefaultConfig()
-	fm := domain.Frontmatter{
-		Variables: make(map[string]domain.VariableSpec),
-	}
+	r := NewResolver(cfg, domain.Snippet{}, domain.Frontmatter{})
 
-	// Frontmatter defines suggestions for "method" but inline select takes precedence
-	fm.Variables["method"] = domain.VariableSpec{
-		Suggestions: []string{"override", "shouldNotSee"},
-	}
-
-	r := NewResolver(cfg, domain.Snippet{}, fm)
-
-	// Inline select options should override everything else
+	// Select options from frontmatter-populated Placeholder
 	pMethod := domain.Placeholder{
 		Name:          "method",
 		IsSelect:      true,
@@ -225,53 +211,21 @@ func TestResolver_GetSuggestions_SelectOptions(t *testing.T) {
 		}
 	}
 
-	// Default value should resolve to first option
+	// Default value should resolve from Placeholder field
 	defVal := r.GetDefaultValue(pMethod)
 	if defVal != "GET" {
 		t.Errorf("expected default value 'GET', got %q", defVal)
 	}
 }
 
-func TestResolver_GetSuggestions_SelectOverridesFrontmatter(t *testing.T) {
-	cfg := config.DefaultConfig()
-	fm := domain.Frontmatter{
-		Variables: make(map[string]domain.VariableSpec),
-	}
-	cmdDefault := "ls -la"
-	fm.Variables["action"] = domain.VariableSpec{
-		Default:     &cmdDefault,
-		Suggestions: []string{"fm1", "fm2"},
-	}
-
-	r := NewResolver(cfg, domain.Snippet{}, fm)
-
-	pAction := domain.Placeholder{
-		Name:          "action",
-		IsSelect:      true,
-		SelectOptions: []string{"inline1", "inline2", "inline3"},
-		IsDefault:     true,
-		DefaultValue:  "inline1",
-	}
-
-	suggs, err := r.GetSuggestions(pAction, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Must return inline options, not frontmatter suggestions
-	if len(suggs) != 3 || suggs[0] != "inline1" {
-		t.Errorf("expected inline select options, got: %v", suggs)
-	}
-
-	defVal := r.GetDefaultValue(pAction)
-	if defVal != "inline1" {
-		t.Errorf("expected default 'inline1', got %q", defVal)
-	}
-}
-
 func TestResolver_RenderSnippet(t *testing.T) {
 	snip := domain.Snippet{
-		Body: "curl -X <@method:?GET> -H <@headers:cmd> <@url>",
+		Body: "curl -X <@method> -H <@headers> <@url>",
+		Placeholders: []domain.Placeholder{
+			{Name: "method", IsDefault: true, DefaultValue: "GET"},
+			{Name: "headers", IsCommand: true, Command: "cmd"},
+			{Name: "url"},
+		},
 	}
 	r := NewResolver(config.DefaultConfig(), snip, domain.Frontmatter{})
 
@@ -298,48 +252,12 @@ func TestResolver_RenderSnippet(t *testing.T) {
 	}
 }
 
-func TestResolver_GetSuggestions_SelectOverridesAllSources(t *testing.T) {
-	cfg := config.DefaultConfig()
-	cfg.Variables["action"] = domain.VariableSpec{
-		Suggestions: []string{"cfg1", "cfg2"},
-	}
-
-	fm := domain.Frontmatter{
-		Variables: make(map[string]domain.VariableSpec),
-	}
-	cmdDefault := "ls -la"
-	fm.Variables["action"] = domain.VariableSpec{
-		Default:     &cmdDefault,
-		Suggestions: []string{"fm1", "fm2"},
-	}
-
-	r := NewResolver(cfg, domain.Snippet{}, fm)
-
-	pAction := domain.Placeholder{
-		Name:          "action",
-		IsSelect:      true,
-		SelectOptions: []string{"inlineA", "inlineB"},
-		IsDefault:     true,
-		DefaultValue:  "inlineA",
-	}
-
-	suggs, err := r.GetSuggestions(pAction, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(suggs) != 2 || suggs[0] != "inlineA" {
-		t.Errorf("expected inline select options to override all, got: %v", suggs)
-	}
-}
-
 func TestResolver_RenderSnippet_SelectPlaceholder(t *testing.T) {
 	snip := domain.Snippet{
-		Body: "curl -X <$METHOD:?GET|POST> <$URL>",
+		Body: "curl -X <$METHOD> <$URL>",
 		Placeholders: []domain.Placeholder{
 			{
 				Name:          "METHOD",
-				Raw:           "<$METHOD:?GET|POST>",
 				IsSelect:      true,
 				SelectOptions: []string{"GET", "POST"},
 				IsDefault:     true,
@@ -347,7 +265,6 @@ func TestResolver_RenderSnippet_SelectPlaceholder(t *testing.T) {
 			},
 			{
 				Name: "URL",
-				Raw:  "<$URL>",
 			},
 		},
 	}
@@ -377,11 +294,10 @@ func TestResolver_RenderSnippet_SelectPlaceholder(t *testing.T) {
 
 func TestResolver_RenderSnippet_SelectDefaultFallback(t *testing.T) {
 	snip := domain.Snippet{
-		Body: "curl -X <@method:?GET|POST> <$URL>",
+		Body: "curl -X <@method> <$URL>",
 		Placeholders: []domain.Placeholder{
 			{
 				Name:          "method",
-				Raw:           "<@method:?GET|POST>",
 				IsSelect:      true,
 				SelectOptions: []string{"GET", "POST"},
 				IsDefault:     true,
@@ -389,7 +305,6 @@ func TestResolver_RenderSnippet_SelectDefaultFallback(t *testing.T) {
 			},
 			{
 				Name: "URL",
-				Raw:  "<$URL>",
 			},
 		},
 	}
@@ -404,18 +319,16 @@ func TestResolver_RenderSnippet_SelectDefaultFallback(t *testing.T) {
 
 func TestResolver_RenderSnippet_CustomBoundaries(t *testing.T) {
 	snip := domain.Snippet{
-		Body:       "echo {{@name:?world}} {{@greeting}}",
+		Body:       "echo {{@name}} {{@greeting}}",
 		Boundaries: domain.Boundaries{Open: "{{", Close: "}}"},
 		Placeholders: []domain.Placeholder{
 			{
 				Name:         "name",
-				Raw:          "{{@name:?world}}",
 				IsDefault:    true,
 				DefaultValue: "world",
 			},
 			{
 				Name: "greeting",
-				Raw:  "{{@greeting}}",
 			},
 		},
 	}
@@ -437,6 +350,61 @@ func TestResolver_RenderSnippet_CustomBoundaries(t *testing.T) {
 	expectedDefault := "echo world Hi"
 	if renderedDefault != expectedDefault {
 		t.Errorf("expected %q, got %q", expectedDefault, renderedDefault)
+	}
+}
+
+func TestIsCmdSuggestion(t *testing.T) {
+	tests := []struct {
+		input   string
+		wantOK  bool
+		wantCmd string
+	}{
+		{"$(ls -la)", true, "ls -la"},
+		{"$(docker ps --format \"{{.Names}}\")", true, `docker ps --format "{{.Names}}"`},
+		{`$(docker ps --format "{{.Names}}")`, true, `docker ps --format "{{.Names}}"`},
+		{"$(ls /tmp/*.json 2>/dev/null || echo foo)", true, "ls /tmp/*.json 2>/dev/null || echo foo"},
+		{"plain-text", false, ""},
+		{"$(incomplete", false, ""},
+	}
+	for _, tc := range tests {
+		cmd, ok := isCmdSuggestion(tc.input)
+		if ok != tc.wantOK || cmd != tc.wantCmd {
+			t.Errorf("isCmdSuggestion(%q) = (%q, %v), want (%q, %v)", tc.input, cmd, ok, tc.wantCmd, tc.wantOK)
+		}
+	}
+}
+
+func TestResolver_GetSuggestions_CmdSuggestionInFrontmatter(t *testing.T) {
+	cfg := config.DefaultConfig()
+	// Placeholder with a $(...) command-backed suggestion
+	p := domain.Placeholder{
+		Name:          "file",
+		IsSelect:      true,
+		SelectOptions: []string{"$(ls -la /tmp/ | head -3)"},
+	}
+	r := NewResolver(cfg, domain.Snippet{}, domain.Frontmatter{})
+	suggs, err := r.GetSuggestions(p, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(suggs) == 0 {
+		t.Fatal("expected suggestions from command, got empty")
+	}
+}
+
+func TestResolver_GetSuggestions_CmdSuggestionInConfig(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Variables["file"] = domain.VariableSpec{
+		Suggestions: []string{"$(echo -e 'a\\nb\\nc')"},
+	}
+	p := domain.Placeholder{Name: "file"}
+	r := NewResolver(cfg, domain.Snippet{}, domain.Frontmatter{})
+	suggs, err := r.GetSuggestions(p, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(suggs) != 3 || suggs[0] != "a" || suggs[1] != "b" || suggs[2] != "c" {
+		t.Errorf("expected [a b c], got %v", suggs)
 	}
 }
 
