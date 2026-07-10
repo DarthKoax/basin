@@ -142,12 +142,11 @@ func TestWizardSelectPlaceholder_SuggestionsRendered(t *testing.T) {
 		Name:         "HTTP request",
 		RelativePath: "http.md",
 		Description:  "Send an HTTP request.",
-		Body:         "curl -X <$METHOD:?GET|POST|PUT|DELETE> $URL",
+		Body:         "curl -X <$METHOD> $URL",
 		Language:     "sh",
 		Placeholders: []domain.Placeholder{
 			{
 				Name:          "METHOD",
-				Raw:           "<$METHOD:?GET|POST|PUT|DELETE>",
 				IsSelect:      true,
 				IsDefault:     true,
 				DefaultValue:  "GET",
@@ -155,7 +154,6 @@ func TestWizardSelectPlaceholder_SuggestionsRendered(t *testing.T) {
 			},
 			{
 				Name: "URL",
-				Raw:  "$URL",
 			},
 		},
 	}
@@ -216,12 +214,11 @@ func TestWizardSelect_NavigateSuggestions(t *testing.T) {
 		Name:         "HTTP request",
 		RelativePath: "http.md",
 		Description:  "Send an HTTP request.",
-		Body:         "curl -X <$METHOD:?GET|POST> $URL",
+		Body:         "curl -X <$METHOD> $URL",
 		Language:     "sh",
 		Placeholders: []domain.Placeholder{
 			{
 				Name:          "METHOD",
-				Raw:           "<$METHOD:?GET|POST>",
 				IsSelect:      true,
 				IsDefault:     true,
 				DefaultValue:  "GET",
@@ -229,7 +226,6 @@ func TestWizardSelect_NavigateSuggestions(t *testing.T) {
 			},
 			{
 				Name: "URL",
-				Raw:  "$URL",
 			},
 		},
 	}
@@ -282,12 +278,11 @@ func TestWizardSelect_ConfirmAndAdvance(t *testing.T) {
 		Name:         "HTTP request",
 		RelativePath: "http.md",
 		Description:  "Send an HTTP request.",
-		Body:         "curl -X <$METHOD:?GET|POST> $URL",
+		Body:         "curl -X <$METHOD> $URL",
 		Language:     "sh",
 		Placeholders: []domain.Placeholder{
 			{
 				Name:          "METHOD",
-				Raw:           "<$METHOD:?GET|POST>",
 				IsSelect:      true,
 				IsDefault:     true,
 				DefaultValue:  "GET",
@@ -295,7 +290,6 @@ func TestWizardSelect_ConfirmAndAdvance(t *testing.T) {
 			},
 			{
 				Name: "URL",
-				Raw:  "$URL",
 			},
 		},
 	}
@@ -351,12 +345,11 @@ func TestWizardSelect_FullRenderConfirmCopiesSnippet(t *testing.T) {
 		Name:         "HTTP request",
 		RelativePath: "http.md",
 		Description:  "Send an HTTP request.",
-		Body:         "curl -X <$METHOD:?GET|POST> <$URL>",
+		Body:         "curl -X <$METHOD> <$URL>",
 		Language:     "sh",
 		Placeholders: []domain.Placeholder{
 			{
 				Name:          "METHOD",
-				Raw:           "<$METHOD:?GET|POST>",
 				IsSelect:      true,
 				IsDefault:     true,
 				DefaultValue:  "GET",
@@ -364,7 +357,6 @@ func TestWizardSelect_FullRenderConfirmCopiesSnippet(t *testing.T) {
 			},
 			{
 				Name: "URL",
-				Raw:  "<$URL>",
 			},
 		},
 	}
@@ -505,5 +497,249 @@ func TestFloatingPane_CenteredPosition(t *testing.T) {
 
 	if !foundTitle {
 		t.Fatal("expected to find floating pane title in view")
+	}
+}
+
+func TestFloatingPane_SmallTerminal(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snip := newTestSnippet()
+	snippets := []domain.Snippet{snip}
+	files := []domain.SnippetFile{}
+	m := NewAppModel(cfg, nil, snippets, files)
+	m.termWidth = 50
+	m.termHeight = 12
+
+	m.showFloatingPane("Test", []string{"Content"}, 40, 10)
+
+	view := m.View()
+
+	if !viewContains(view, "Test") {
+		t.Fatal("expected floating pane to still render in small terminal")
+	}
+}
+
+func TestFloatingPane_TooSmallTerminal(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snip := newTestSnippet()
+	snippets := []domain.Snippet{snip}
+	files := []domain.SnippetFile{}
+	m := NewAppModel(cfg, nil, snippets, files)
+	m.termWidth = 10
+	m.termHeight = 4
+
+	m.showFloatingPane("Test", []string{"Content"}, 40, 10)
+
+	view := m.View()
+
+	if viewContains(view, "Test") {
+		t.Fatal("expected floating pane NOT to render when terminal is too small")
+	}
+}
+
+func TestPaneCollapse_LeftCollapse(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snip := newTestSnippet()
+	snippets := []domain.Snippet{snip}
+	files := []domain.SnippetFile{}
+	m := NewAppModel(cfg, nil, snippets, files)
+	m.termWidth = 120
+	m.termHeight = 40
+
+	if m.leftCollapsed {
+		t.Fatal("left pane should not be collapsed initially")
+	}
+
+	leftBefore, _, _ := m.panelDims()
+
+	m.leftCollapsed = true
+	leftAfter, _, _ := m.panelDims()
+
+	if leftAfter >= leftBefore {
+		t.Errorf("expected left pane to shrink after collapse, before=%d after=%d", leftBefore, leftAfter)
+	}
+	if leftAfter > 5 {
+		t.Errorf("expected collapsed left pane to be very narrow, got %d", leftAfter)
+	}
+}
+
+func TestPaneCollapse_RightCollapse(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snip := newTestSnippet()
+	snippets := []domain.Snippet{snip}
+	files := []domain.SnippetFile{}
+	m := NewAppModel(cfg, nil, snippets, files)
+	m.termWidth = 120
+	m.termHeight = 40
+
+	if m.rightCollapsed {
+		t.Fatal("right pane should not be collapsed initially")
+	}
+
+	_, rightBefore, _ := m.panelDims()
+
+	m.rightCollapsed = true
+	_, rightAfter, _ := m.panelDims()
+
+	if rightAfter >= rightBefore {
+		t.Errorf("expected right pane to shrink after collapse, before=%d after=%d", rightBefore, rightAfter)
+	}
+	if rightAfter > 5 {
+		t.Errorf("expected collapsed right pane to be very narrow, got %d", rightAfter)
+	}
+}
+
+func TestPaneResize_Keybindings(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snip := newTestSnippet()
+	snippets := []domain.Snippet{snip}
+	files := []domain.SnippetFile{}
+	m := NewAppModel(cfg, nil, snippets, files)
+	m.termWidth = 120
+	m.termHeight = 40
+
+	initialPct := m.runtimeWidthPct
+
+	leftBracket := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}}
+	model, _ := m.Update(leftBracket)
+	m = model.(*AppModel)
+
+	if m.runtimeWidthPct >= initialPct {
+		t.Errorf("expected width percent to decrease after '[', got %d (was %d)", m.runtimeWidthPct, initialPct)
+	}
+
+	rightBracket := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}}
+	model, _ = m.Update(rightBracket)
+	m = model.(*AppModel)
+
+	if m.runtimeWidthPct != initialPct {
+		t.Errorf("expected width percent to return to initial after ']', got %d (expected %d)", m.runtimeWidthPct, initialPct)
+	}
+}
+
+func TestPaneCollapse_Keybindings(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snip := newTestSnippet()
+	snippets := []domain.Snippet{snip}
+	files := []domain.SnippetFile{}
+	m := NewAppModel(cfg, nil, snippets, files)
+	m.termWidth = 120
+	m.termHeight = 40
+
+	leftBrace := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'{'}}
+	model, _ := m.Update(leftBrace)
+	m = model.(*AppModel)
+
+	if !m.leftCollapsed {
+		t.Fatal("expected left pane to collapse after '{' key")
+	}
+
+	model, _ = m.Update(leftBrace)
+	m = model.(*AppModel)
+
+	if m.leftCollapsed {
+		t.Fatal("expected left pane to uncollapse after second '{' key")
+	}
+
+	rightBrace := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'}'}}
+	model, _ = m.Update(rightBrace)
+	m = model.(*AppModel)
+
+	if !m.rightCollapsed {
+		t.Fatal("expected right pane to collapse after '}' key")
+	}
+}
+
+func TestFooterContainsCollapseButtons(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snip := newTestSnippet()
+	snippets := []domain.Snippet{snip}
+	files := []domain.SnippetFile{}
+	m := NewAppModel(cfg, nil, snippets, files)
+	m.termWidth = 120
+	m.termHeight = 40
+
+	view := m.View()
+
+	if !viewContains(view, "◀") && !viewContains(view, "▶") {
+		t.Fatal("expected footer to contain collapse button symbols")
+	}
+}
+
+func TestFooterCollapseButtonsChange(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snip := newTestSnippet()
+	snippets := []domain.Snippet{snip}
+	files := []domain.SnippetFile{}
+	m := NewAppModel(cfg, nil, snippets, files)
+	m.termWidth = 120
+	m.termHeight = 40
+
+	m.leftCollapsed = true
+	view := m.View()
+
+	if !viewContains(view, "▶") {
+		t.Fatal("expected footer to show expand button when left pane is collapsed")
+	}
+}
+
+func TestRuntimeWidthPct_Clamped(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snip := newTestSnippet()
+	snippets := []domain.Snippet{snip}
+	files := []domain.SnippetFile{}
+	m := NewAppModel(cfg, nil, snippets, files)
+	m.termWidth = 120
+	m.termHeight = 40
+
+	m.runtimeWidthPct = 2
+	leftBracket := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}}
+	model, _ := m.Update(leftBracket)
+	m = model.(*AppModel)
+
+	if m.runtimeWidthPct < 5 {
+		t.Errorf("expected runtimeWidthPct to be clamped to minimum 5, got %d", m.runtimeWidthPct)
+	}
+
+	m.runtimeWidthPct = 89
+	rightBracket := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}}
+	model, _ = m.Update(rightBracket)
+	m = model.(*AppModel)
+
+	if m.runtimeWidthPct > 90 {
+		t.Errorf("expected runtimeWidthPct to be clamped to maximum 90, got %d", m.runtimeWidthPct)
+	}
+}
+
+func TestOutputConfig_DisableClipboard(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Output.Clipboard = false
+	snip := domain.Snippet{
+		Name:         "no-clip",
+		RelativePath: "test.md",
+		Body:         "echo hello",
+		Language:     "sh",
+	}
+	snippets := []domain.Snippet{snip}
+	files := []domain.SnippetFile{}
+	m := NewAppModel(cfg, nil, snippets, files)
+	m.termWidth = 120
+	m.termHeight = 40
+
+	cmd := m.finalizeSnippet("echo hello")
+	if cmd == nil {
+		t.Fatal("expected finalizeSnippet to return a quit command")
+	}
+	if !m.Done {
+		t.Fatal("expected Done to be true")
+	}
+	if m.FinalSnippet != "echo hello" {
+		t.Errorf("expected FinalSnippet to be 'echo hello', got %q", m.FinalSnippet)
+	}
+}
+
+func TestAutoCopyOnSelect_DisabledByDefault(t *testing.T) {
+	cfg := config.DefaultConfig()
+	if cfg.Behavior.AutoCopyOnSelect {
+		t.Fatal("expected AutoCopyOnSelect to be disabled by default")
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"basin/internal/domain"
 )
 
+func strPtr(s string) *string { return &s }
+
 func TestParseFile_Simple(t *testing.T) {
 	mdContent := `---
 name: Shell utilities
@@ -16,6 +18,10 @@ variables:
   environment:
     default: dev
     suggestions: [dev, stage, prod]
+  path:
+    default: "."
+  file:
+    command: "rg . --files"
 ---
 
 # Ignored Title
@@ -25,7 +31,7 @@ variables:
 This shows directory contents.
 
 ` + "```sh" + `
-ls -la <@path:?.>
+ls -la <@path>
 ` + "```" + `
 
 ## Read base64 file
@@ -35,7 +41,7 @@ Example preview block
 ` + "```" + `
 
 ` + "```bash" + `
-base64 -d <@file:rg . --files>
+base64 -d <@file>
 ` + "```" + `
 `
 
@@ -108,8 +114,11 @@ func TestSlugify(t *testing.T) {
 }
 
 func TestExtractPlaceholders_Deduplicate(t *testing.T) {
-	body := "echo <@input:?default> <@input:cmd> <@other>"
-	placeholders := extractPlaceholders(body, domain.Boundaries{})
+	body := "echo <@input> <@input> <@other>"
+	variables := map[string]domain.VariableSpec{
+		"input": {Default: strPtr("default")},
+	}
+	placeholders := extractPlaceholders(body, domain.Boundaries{}, variables)
 
 	if len(placeholders) != 2 {
 		t.Fatalf("expected 2 unique placeholders, got %d", len(placeholders))
@@ -125,9 +134,16 @@ func TestExtractPlaceholders_Deduplicate(t *testing.T) {
 }
 
 func TestExtractPlaceholders_PipeSeparatedOptions(t *testing.T) {
-	body := "curl -X <@method:?GET|POST|PUT|DELETE> <@url:?.>"
+	body := "curl -X <@method> <@url>"
+	variables := map[string]domain.VariableSpec{
+		"method": {
+			Default:     strPtr("GET"),
+			Suggestions: []string{"GET", "POST", "PUT", "DELETE"},
+		},
+		"url": {Default: strPtr(".")},
+	}
 
-	placeholders := extractPlaceholders(body, domain.Boundaries{})
+	placeholders := extractPlaceholders(body, domain.Boundaries{}, variables)
 
 	if len(placeholders) != 2 {
 		t.Fatalf("expected 2 placeholders, got %d", len(placeholders))
@@ -149,7 +165,7 @@ func TestExtractPlaceholders_PipeSeparatedOptions(t *testing.T) {
 	}
 	expectedOpts := []string{"GET", "POST", "PUT", "DELETE"}
 	if len(m.SelectOptions) != len(expectedOpts) {
-		t.Fatalf("expected 4 select options, got %d", len(m.SelectOptions))
+		t.Fatalf("expected %d select options, got %d", len(expectedOpts), len(m.SelectOptions))
 	}
 	for i, opt := range expectedOpts {
 		if m.SelectOptions[i] != opt {
@@ -171,9 +187,17 @@ func TestExtractPlaceholders_PipeSeparatedOptions(t *testing.T) {
 }
 
 func TestExtractPlaceholders_SelectAndCommandMixed(t *testing.T) {
-	body := "docker run <@image:?nginx|redis> -p <@port:?.> --volume <@path:npx dir-select>"
+	body := "docker run <@image> -p <@port> --volume <@path>"
+	variables := map[string]domain.VariableSpec{
+		"image": {
+			Default:     strPtr("nginx"),
+			Suggestions: []string{"nginx", "redis"},
+		},
+		"port":  {Default: strPtr(".")},
+		"path":  {Command: "npx dir-select"},
+	}
 
-	placeholders := extractPlaceholders(body, domain.Boundaries{})
+	placeholders := extractPlaceholders(body, domain.Boundaries{}, variables)
 
 	if len(placeholders) != 3 {
 		t.Fatalf("expected 3 placeholders, got %d", len(placeholders))
@@ -199,8 +223,14 @@ func TestExtractPlaceholders_SelectAndCommandMixed(t *testing.T) {
 }
 
 func TestExtractPlaceholders_SelectWithDollarPrefix(t *testing.T) {
-	body := "curl -X <$METHOD:?GET|POST> <$URL>"
-	placeholders := extractPlaceholders(body, domain.Boundaries{})
+	body := "curl -X <$METHOD> <$URL>"
+	variables := map[string]domain.VariableSpec{
+		"METHOD": {
+			Default:     strPtr("GET"),
+			Suggestions: []string{"GET", "POST"},
+		},
+	}
+	placeholders := extractPlaceholders(body, domain.Boundaries{}, variables)
 
 	if len(placeholders) != 2 {
 		t.Fatalf("expected 2 placeholders, got %d", len(placeholders))
@@ -221,8 +251,11 @@ func TestExtractPlaceholders_SelectWithDollarPrefix(t *testing.T) {
 }
 
 func TestExtractPlaceholders_SelectSinglePipeElementNotSelect(t *testing.T) {
-	body := "<@host:?localhost>"
-	placeholders := extractPlaceholders(body, domain.Boundaries{})
+	body := "<@host>"
+	variables := map[string]domain.VariableSpec{
+		"host": {Default: strPtr("localhost")},
+	}
+	placeholders := extractPlaceholders(body, domain.Boundaries{}, variables)
 
 	if len(placeholders) != 1 {
 		t.Fatalf("expected 1 placeholder, got %d", len(placeholders))
@@ -238,8 +271,14 @@ func TestExtractPlaceholders_SelectSinglePipeElementNotSelect(t *testing.T) {
 }
 
 func TestExtractPlaceholders_SelectWithSpacesInOptions(t *testing.T) {
-	body := "<@env:?development|staging|production>"
-	placeholders := extractPlaceholders(body, domain.Boundaries{})
+	body := "<@env>"
+	variables := map[string]domain.VariableSpec{
+		"env": {
+			Default:     strPtr("development"),
+			Suggestions: []string{"development", "staging", "production"},
+		},
+	}
+	placeholders := extractPlaceholders(body, domain.Boundaries{}, variables)
 
 	if len(placeholders) != 1 {
 		t.Fatalf("expected 1 placeholder, got %d", len(placeholders))
@@ -264,6 +303,10 @@ func TestParseFile_SelectPlaceholderInSnippet(t *testing.T) {
 	mdContent := `---
 name: HTTP snippets
 tags: [http, curl]
+variables:
+  CURL_METHOD:
+    default: GET
+    suggestions: [GET, POST, PUT, DELETE]
 ---
 
 ## HTTP request method toggle
@@ -271,7 +314,7 @@ tags: [http, curl]
 Toggle the method for a request.
 
 ` + "```sh" + `
-curl -X <$CURL_METHOD:?GET|POST|PUT|DELETE> <$CURL_URL>
+curl -X <$CURL_METHOD> <$CURL_URL>
 ` + "```" + `
 `
 
@@ -323,6 +366,11 @@ tags: [test]
 boundaries:
   open: "{{"
   close: "}}"
+variables:
+  name:
+    default: world
+  greeting:
+    command: "hello"
 ---
 
 ## Test custom boundaries
@@ -330,7 +378,7 @@ boundaries:
 Test snippet with custom delimiters.
 
 ` + "```sh" + `
-echo {{@name:?world}} {{@greeting:hello}}
+echo {{@name}} {{@greeting}}
 ` + "```" + `
 `
 
@@ -371,9 +419,13 @@ echo {{@name:?world}} {{@greeting:hello}}
 }
 
 func TestExtractPlaceholders_CustomBoundaries(t *testing.T) {
-	body := "echo {{@name:?world}} {{@greeting:hello}}"
+	body := "echo {{@name}} {{@greeting}}"
 	boundaries := domain.Boundaries{Open: "{{", Close: "}}"}
-	placeholders := extractPlaceholders(body, boundaries)
+	variables := map[string]domain.VariableSpec{
+		"name":     {Default: strPtr("world")},
+		"greeting": {Command: "hello"},
+	}
+	placeholders := extractPlaceholders(body, boundaries, variables)
 
 	if len(placeholders) != 2 {
 		t.Fatalf("expected 2 placeholders, got %d", len(placeholders))
@@ -389,9 +441,15 @@ func TestExtractPlaceholders_CustomBoundaries(t *testing.T) {
 }
 
 func TestExtractPlaceholders_CustomBoundariesWithSelect(t *testing.T) {
-	body := "{{@method:?GET|POST|PUT}}"
+	body := "{{@method}}"
 	boundaries := domain.Boundaries{Open: "{{", Close: "}}"}
-	placeholders := extractPlaceholders(body, boundaries)
+	variables := map[string]domain.VariableSpec{
+		"method": {
+			Default:     strPtr("GET"),
+			Suggestions: []string{"GET", "POST", "PUT"},
+		},
+	}
+	placeholders := extractPlaceholders(body, boundaries, variables)
 
 	if len(placeholders) != 1 {
 		t.Fatalf("expected 1 placeholder, got %d", len(placeholders))

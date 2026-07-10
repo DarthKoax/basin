@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/pelletier/go-toml/v2"
 	"basin/internal/domain"
+	"github.com/pelletier/go-toml/v2"
 )
 
 // PathsConfig holds the list of paths where snippets are stored.
@@ -27,11 +27,24 @@ type PanelConfig struct {
 	HeightPercent int    `toml:"height_percent"`
 }
 
+// OutputConfig controls what happens when a strand is completed.
+type OutputConfig struct {
+	Stdout    bool `toml:"stdout"`
+	Clipboard bool `toml:"clipboard"`
+}
+
+// BehaviorConfig controls interactive behavior settings.
+type BehaviorConfig struct {
+	AutoCopyOnSelect bool `toml:"auto_copy_on_select"`
+}
+
 // Config represents the application configuration format.
 type Config struct {
-	Paths              PathsConfig                     `toml:"paths"`
-	SuggestionCommands SuggestionCommandsConfig        `toml:"suggestion_commands"`
-	Panel              PanelConfig                     `toml:"panel"`
+	Paths              PathsConfig                    `toml:"paths"`
+	SuggestionCommands SuggestionCommandsConfig       `toml:"suggestion_commands"`
+	Panel              PanelConfig                    `toml:"panel"`
+	Output             OutputConfig                   `toml:"output"`
+	Behavior           BehaviorConfig                 `toml:"behavior"`
 	Variables          map[string]domain.VariableSpec `toml:"variables"`
 }
 
@@ -46,6 +59,13 @@ func DefaultConfig() *Config {
 			Position:      "left",
 			WidthPercent:  25,
 			HeightPercent: 100,
+		},
+		Output: OutputConfig{
+			Stdout:    true,
+			Clipboard: true,
+		},
+		Behavior: BehaviorConfig{
+			AutoCopyOnSelect: false,
 		},
 		Variables: make(map[string]domain.VariableSpec),
 	}

@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	"gopkg.in/yaml.v3"
 	"basin/internal/domain"
+	"gopkg.in/yaml.v3"
 )
 
 var defaultBoundaries = domain.Boundaries{Open: "<", Close: ">"}
@@ -35,10 +35,11 @@ func Slugify(s string) string {
 }
 
 // buildPlaceholderRegex creates a regex pattern for the given boundary characters.
+// Only matches <@name> and <$name> — no inline defaults, options, or commands.
 func buildPlaceholderRegex(open, close string) *regexp.Regexp {
 	openEsc := regexp.QuoteMeta(open)
 	closeEsc := regexp.QuoteMeta(close)
-	pattern := openEsc + `[@$]([a-zA-Z0-9_-]+)(?::(\?[^` + closeEsc + `]*|[^` + closeEsc + `]+))?` + closeEsc
+	pattern := openEsc + `[@$]([a-zA-Z0-9_-]+)` + closeEsc
 	return regexp.MustCompile(pattern)
 }
 
@@ -165,7 +166,7 @@ func ParseFile(path string, rootDir string, reader io.Reader) (*domain.SnippetFi
 		bodyText := strings.Join(raw.bodyLines, "\n")
 		descText := strings.TrimSpace(strings.Join(raw.descLines, "\n"))
 
-		placeholders := extractPlaceholders(bodyText, snippetFile.Frontmatter.Boundaries)
+		placeholders := extractPlaceholders(bodyText, snippetFile.Frontmatter.Boundaries, snippetFile.Frontmatter.Variables)
 
 		slug := Slugify(raw.name)
 		id := relPath + "#" + slug
@@ -221,7 +222,7 @@ func DiscoverAndParse(roots []string) ([]domain.SnippetFile, error) {
 	return files, nil
 }
 
-func extractPlaceholders(body string, boundaries domain.Boundaries) []domain.Placeholder {
+func extractPlaceholders(body string, boundaries domain.Boundaries, variables map[string]domain.VariableSpec) []domain.Placeholder {
 	open := boundaries.Open
 	close := boundaries.Close
 	if open == "" {
@@ -243,51 +244,38 @@ func extractPlaceholders(body string, boundaries domain.Boundaries) []domain.Pla
 	for _, match := range matches {
 		raw := match[0]
 		name := match[1]
-		source := match[2]
-
-		var defVal string
-		var cmd string
-		var isDef bool
-		var isCmd bool
-		var isSelect bool
-		var selectOptions []string
-
-		if source != "" {
-			if strings.HasPrefix(source, "?") {
-				valuePart := strings.TrimPrefix(source, "?")
-				parts := strings.Split(valuePart, "|")
-				if len(parts) > 1 {
-					isDef = true
-					isSelect = true
-					defVal = parts[0]
-					for _, p := range parts {
-						selectOptions = append(selectOptions, p)
-					}
-				} else {
-					isDef = true
-					defVal = valuePart
-				}
-			} else {
-				isCmd = true
-				cmd = source
-			}
-		}
 
 		if seen[name] {
-			continue // deduplicate by name, keeping first occurrence
+			continue
 		}
 		seen[name] = true
 
-		placeholders = append(placeholders, domain.Placeholder{
-			Name:          name,
-			Raw:           raw,
-			DefaultValue:  defVal,
-			Command:       cmd,
-			IsDefault:     isDef,
-			IsCommand:     isCmd,
-			IsSelect:      isSelect,
-			SelectOptions: selectOptions,
-		})
+		ph := domain.Placeholder{
+			Name: name,
+			Raw:  raw,
+		}
+
+		// Merge frontmatter VariableSpec into Placeholder fields
+		if spec, ok := variables[name]; ok {
+			if spec.Default != nil {
+				ph.IsDefault = true
+				ph.DefaultValue = *spec.Default
+			}
+			if spec.Command != "" {
+				ph.IsCommand = true
+				ph.Command = spec.Command
+			}
+			if len(spec.Suggestions) > 0 {
+				ph.IsSelect = true
+				ph.SelectOptions = spec.Suggestions
+				if !ph.IsDefault && len(spec.Suggestions) > 0 {
+					ph.IsDefault = true
+					ph.DefaultValue = spec.Suggestions[0]
+				}
+			}
+		}
+
+		placeholders = append(placeholders, ph)
 	}
 
 	return placeholders

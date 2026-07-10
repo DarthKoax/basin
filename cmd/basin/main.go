@@ -7,12 +7,18 @@ import (
 	"regexp"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/spf13/cobra"
 	"basin/internal/config"
 	"basin/internal/domain"
 	"basin/internal/parser"
 	"basin/internal/tui"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/spf13/cobra"
+)
+
+var (
+	flagNoStdout    bool
+	flagNoClipboard bool
+	flagNoAutoCopy  bool
 )
 
 var rootCmd = &cobra.Command{
@@ -51,6 +57,10 @@ func init() {
 	rootCmd.AddCommand(executeCmd)
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(lintCmd)
+
+	rootCmd.PersistentFlags().BoolVar(&flagNoStdout, "no-stdout", false, "disable printing the strand to stdout on completion")
+	rootCmd.PersistentFlags().BoolVar(&flagNoClipboard, "no-clipboard", false, "disable copying the strand to clipboard on completion")
+	rootCmd.PersistentFlags().BoolVar(&flagNoAutoCopy, "no-auto-copy", false, "disable auto-copying strand body to clipboard when highlighted")
 }
 
 func main() {
@@ -111,6 +121,16 @@ func runExecute() {
 		os.Exit(1)
 	}
 
+	if flagNoStdout {
+		cfg.Output.Stdout = false
+	}
+	if flagNoClipboard {
+		cfg.Output.Clipboard = false
+	}
+	if flagNoAutoCopy {
+		cfg.Behavior.AutoCopyOnSelect = false
+	}
+
 	roots := getSnippetRoots(cfg)
 	if len(roots) == 0 {
 		fmt.Fprintln(os.Stderr, "No strand directories found. Run 'basin init' to create a starter layout.")
@@ -143,7 +163,7 @@ func runExecute() {
 	}
 
 	appModel := finalModel.(*tui.AppModel)
-	if appModel.Done {
+	if appModel.Done && cfg.Output.Stdout {
 		fmt.Print(appModel.FinalSnippet)
 	}
 }

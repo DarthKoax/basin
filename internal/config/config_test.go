@@ -23,6 +23,15 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if cfg.Panel.HeightPercent != 100 {
 		t.Errorf("expected default wizard height_percent to be 100, got %d", cfg.Panel.HeightPercent)
 	}
+	if !cfg.Output.Stdout {
+		t.Error("expected default output.stdout to be true")
+	}
+	if !cfg.Output.Clipboard {
+		t.Error("expected default output.clipboard to be true")
+	}
+	if cfg.Behavior.AutoCopyOnSelect {
+		t.Error("expected default behavior.auto_copy_on_select to be false")
+	}
 }
 
 func TestLoadConfig_ParseFile(t *testing.T) {
