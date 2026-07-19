@@ -220,7 +220,7 @@ func TestResolver_GetSuggestions_SelectFromFrontmatter(t *testing.T) {
 
 func TestResolver_RenderSnippet(t *testing.T) {
 	snip := domain.Snippet{
-		Body: "curl -X <@method> -H <@headers> <@url>",
+		Body: "curl -X <$method> -H <$headers> <$url>",
 		Placeholders: []domain.Placeholder{
 			{Name: "method", IsDefault: true, DefaultValue: "GET"},
 			{Name: "headers", IsCommand: true, Command: "cmd"},
@@ -294,7 +294,7 @@ func TestResolver_RenderSnippet_SelectPlaceholder(t *testing.T) {
 
 func TestResolver_RenderSnippet_SelectDefaultFallback(t *testing.T) {
 	snip := domain.Snippet{
-		Body: "curl -X <@method> <$URL>",
+		Body: "curl -X <$method> <$URL>",
 		Placeholders: []domain.Placeholder{
 			{
 				Name:          "method",
@@ -319,7 +319,7 @@ func TestResolver_RenderSnippet_SelectDefaultFallback(t *testing.T) {
 
 func TestResolver_RenderSnippet_CustomBoundaries(t *testing.T) {
 	snip := domain.Snippet{
-		Body:       "echo {{@name}} {{@greeting}}",
+		Body:       "echo {{$name}} {{$greeting}}",
 		Boundaries: domain.Boundaries{Open: "{{", Close: "}}"},
 		Placeholders: []domain.Placeholder{
 			{

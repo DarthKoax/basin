@@ -197,7 +197,7 @@ tags: [starter, example]
 Show detailed directory listing.
 
 ` + "```sh" + `
-ls -lsha <@path:?.>
+ls -lsha <$path>
 ` + "```" + `
 
 ## Curl JSON endpoint
@@ -205,7 +205,7 @@ ls -lsha <@path:?.>
 Post a request body to a URL.
 
 ` + "```bash" + `
-curl -X POST -H "Content-Type: application/json" -d '<@json_body>' <@url>
+curl -X POST -H "Content-Type: application/json" -d '<$json_body>' <$url>
 ` + "```" + `
 `
 
