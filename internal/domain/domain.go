@@ -15,7 +15,7 @@ type Boundaries struct {
 }
 
 // Placeholder represents a specific occurrence of a variable template inside the snippet body.
-// E.g., <@container>, <@host:rg . --files>, <@port:?8080>.
+// E.g., <$container>, <$host>, <$port>.
 type Placeholder struct {
 	Name          string
 	Raw           string

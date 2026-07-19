@@ -251,12 +251,12 @@ func (r *Resolver) RenderSnippet(confirmed map[string]string) string {
 		return ShellQuote(val)
 	})
 
-	// Replace placeholders <[@$]name> and <[@$]name:...> with either the provided value, a default, or an env var $NAME.
+	// Replace placeholders <$name> with either the provided value, a default, or an env var $NAME.
 	phMap := make(map[string]domain.Placeholder)
 	for _, ph := range r.Snippet.Placeholders {
 		phMap[ph.Name] = ph
 	}
-	envPattern := openEsc + `[@$]([A-Za-z0-9_-]+)` + closeEsc
+	envPattern := openEsc + `\$([A-Za-z0-9_-]+)` + closeEsc
 	envRe := regexp.MustCompile(envPattern)
 	body = envRe.ReplaceAllStringFunc(body, func(m string) string {
 		name := envRe.FindStringSubmatch(m)[1]

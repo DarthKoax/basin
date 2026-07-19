@@ -3,12 +3,14 @@ package parser
 import (
 	"bufio"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"basin/internal/domain"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -35,11 +37,11 @@ func Slugify(s string) string {
 }
 
 // buildPlaceholderRegex creates a regex pattern for the given boundary characters.
-// Only matches <@name> and <$name> — no inline defaults, options, or commands.
+// Only matches <$name> — no inline defaults, options, or commands.
 func buildPlaceholderRegex(open, close string) *regexp.Regexp {
 	openEsc := regexp.QuoteMeta(open)
 	closeEsc := regexp.QuoteMeta(close)
-	pattern := openEsc + `[@$]([a-zA-Z0-9_-]+)` + closeEsc
+	pattern := openEsc + `\$([a-zA-Z0-9_-]+)` + closeEsc
 	return regexp.MustCompile(pattern)
 }
 
@@ -56,6 +58,11 @@ func ParseFile(path string, rootDir string, reader io.Reader) (*domain.SnippetFi
 	var lines []string
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		// Handle the error appropriately (log it, return it, etc.)
+		log.Printf("Error scanning input: %v", err)
+		return nil, err
 	}
 
 	snippetFile := &domain.SnippetFile{

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -31,6 +32,8 @@ const (
 	WizardMode
 	CommandPaletteMode
 )
+
+const overlayMargin = 3
 
 type suggestionMsg struct {
 	suggestions []string
@@ -131,6 +134,13 @@ type AppModel struct {
 	draggingDivider  bool
 	lastMouseX       int
 	lastAutoCopyBody string
+
+	mouseDragging bool
+	mouseDownRow  int
+
+	filenamePromptActive bool
+	filenamePromptInput  textinput.Model
+	filenamePromptRoot   string
 }
 
 func (m *AppModel) showFloatingPane(title string, content []string, width, height int) {
@@ -157,6 +167,9 @@ func NewAppModel(cfg *config.Config, roots []string, snippets []domain.Snippet, 
 	cpInput.Placeholder = "Type a command..."
 	cpInput.Focus()
 
+	fpInput := textinput.New()
+	fpInput.Placeholder = "strand-name"
+
 	m := &AppModel{
 		mode:                   FinderMode,
 		config:                 cfg,
@@ -168,6 +181,7 @@ func NewAppModel(cfg *config.Config, roots []string, snippets []domain.Snippet, 
 		wizardConfirmed:        make(map[string]string),
 		commandPaletteQuery:    cpInput,
 		commandPaletteSelected: 0,
+		filenamePromptInput:    fpInput,
 		listTopOffset:          4,
 		runtimeWidthPct:        cfg.Panel.WidthPercent,
 	}
@@ -355,12 +369,17 @@ func (m *AppModel) initCommands() {
 			},
 		},
 		{
-			name:        "Show Floating Pane",
-			description: "Display a centered floating overlay pane",
+			name:        "New Strand File",
+			description: "Create a new markdown file with sample frontmatter",
 			action: func() tea.Cmd {
-				m.showFloatingPane("Floating Pane", []string{
-					"Press Esc, Enter, or Q to dismiss.",
-				}, 50, 12)
+				if len(m.strandRoots) == 0 {
+					return nil
+				}
+				m.filenamePromptRoot = m.strandRoots[0]
+				m.filenamePromptActive = true
+				m.filenamePromptInput.SetValue("")
+				m.filenamePromptInput.Focus()
+				m.mode = m.commandPalettePrevMode
 				return nil
 			},
 		},
@@ -411,6 +430,7 @@ func (m *AppModel) setupWizardForCurrentVar() tea.Cmd {
 	defVal := r.GetDefaultValue(p)
 	m.wizardInput.SetValue(defVal)
 	m.wizardInput.Placeholder = fmt.Sprintf("Value for %s...", p.Name)
+	m.wizardInput.Width = 30
 
 	m.wizardSuggestions = nil
 	m.wizardSugSelectedIndex = 0
@@ -475,6 +495,64 @@ func (m *AppModel) autoCopyCurrentSnippet() {
 		m.lastAutoCopyBody = body
 		_ = clipboard.WriteAll(body)
 	}
+}
+
+func (m *AppModel) copyPreviewRange(row1, row2 int) {
+	start, end := row1, row2
+	if start > end {
+		start, end = end, start
+	}
+	start -= m.listTopOffset
+	end -= m.listTopOffset
+
+	var previewScroll int
+	var rendered string
+	switch m.mode {
+	case FinderMode:
+		filtered := search.FilterSnippets(m.allSnippets, m.finderQuery.Value())
+		if len(filtered) > 0 && m.finderSelectedIndex < len(filtered) {
+			rendered = m.renderSnippetPreview(filtered[m.finderSelectedIndex])
+			previewScroll = m.finderPreviewScroll
+		}
+	case BrowserMode:
+		if len(m.browserItems) > 0 && m.browserSelectedIndex < len(m.browserItems) {
+			item := m.browserItems[m.browserSelectedIndex]
+			if item.isSnip {
+				rendered = m.renderSnippetPreview(item.snip)
+				previewScroll = m.browserPreviewScroll
+			}
+		}
+	case TagsMode:
+		if m.inTagSnippets && len(m.tagSnippets) > 0 && m.tagSnippetsSelectedIndex < len(m.tagSnippets) {
+			rendered = m.renderSnippetPreview(m.tagSnippets[m.tagSnippetsSelectedIndex])
+			previewScroll = m.tagSnippetsPreviewScroll
+		}
+	}
+	if rendered == "" {
+		return
+	}
+	lines := strings.Split(rendered, "\n")
+
+	visibleStart := previewScroll + start
+	visibleEnd := previewScroll + end
+	if visibleStart < 0 {
+		visibleStart = 0
+	}
+	if visibleEnd >= len(lines) {
+		visibleEnd = len(lines) - 1
+	}
+	if visibleStart > visibleEnd {
+		return
+	}
+
+	var selected strings.Builder
+	for i := visibleStart; i <= visibleEnd; i++ {
+		if i > visibleStart {
+			selected.WriteString("\n")
+		}
+		selected.WriteString(ansi.Strip(lines[i]))
+	}
+	_ = clipboard.WriteAll(selected.String())
 }
 
 func getEditorCommand() (string, []string) {
@@ -595,6 +673,50 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.filenamePromptActive {
+			switch msg.String() {
+			case "enter":
+				name := strings.TrimSpace(m.filenamePromptInput.Value())
+				if name == "" {
+					name = "strand-name"
+				}
+				if !strings.HasSuffix(name, ".md") {
+					name += ".md"
+				}
+				filePath := filepath.Join(m.filenamePromptRoot, name)
+				content := `---
+name: New Strands
+tags: [new]
+---
+
+## Example strand
+
+Description of what this does.
+
+` + "```sh" + `
+echo <$message>
+` + "```" + `
+`
+				if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+					m.filenamePromptActive = false
+					return m, nil
+				}
+				m.filenamePromptActive = false
+				editorCmd, editorArgs := getEditorCommand()
+				args := append(editorArgs, filePath)
+				c := exec.Command(editorCmd, args...)
+				return m, tea.ExecProcess(c, func(err error) tea.Msg {
+					return editorFinishedMsg{err: err}
+				})
+			case "esc":
+				m.filenamePromptActive = false
+				return m, nil
+			default:
+				var cmd tea.Cmd
+				m.filenamePromptInput, cmd = m.filenamePromptInput.Update(msg)
+				return m, cmd
+			}
+		}
 		switch msg.String() {
 		case "ctrl+d":
 			return m, tea.Quit
@@ -687,23 +809,25 @@ func (m *AppModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	col := msg.X
 	leftWidth, _, panelHeight := m.panelDims()
 	innerH := m.innerContentHeight(panelHeight)
-	footerRow := m.termHeight - 1
 	dividerCol := leftWidth + 2
 
 	if msg.Action == tea.MouseActionRelease {
 		m.draggingDivider = false
+		if m.mouseDragging && msg.Button == tea.MouseButtonLeft {
+			m.mouseDragging = false
+			if m.mode != WizardMode && m.mode != CommandPaletteMode {
+				if col >= leftWidth+2 && row >= m.listTopOffset && row < m.listTopOffset+innerH {
+					m.copyPreviewRange(m.mouseDownRow, row)
+				}
+			}
+		}
 		return m, nil
 	}
 
-	if row == footerRow && msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
-		if col >= 0 && col <= 3 {
-			m.leftCollapsed = !m.leftCollapsed
-			return m, nil
-		}
-		if col >= 5 && col <= 8 {
-			m.rightCollapsed = !m.rightCollapsed
-			return m, nil
-		}
+	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && col >= leftWidth+2 && row >= m.listTopOffset && row < m.listTopOffset+innerH && m.mode != WizardMode && m.mode != CommandPaletteMode {
+		m.mouseDragging = true
+		m.mouseDownRow = row
+		return m, nil
 	}
 
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && col >= dividerCol-1 && col <= dividerCol+1 && row >= 3 && row < 3+panelHeight {
@@ -714,7 +838,7 @@ func (m *AppModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	if m.draggingDivider && (msg.Action == tea.MouseActionMotion || msg.Action == tea.MouseActionPress) {
 		if col != m.lastMouseX {
-			newPct := (col * 105) / m.termWidth
+			newPct := (col * 100) / m.termWidth
 			if newPct < 5 {
 				newPct = 5
 			}
@@ -726,6 +850,10 @@ func (m *AppModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.rightCollapsed = false
 			m.lastMouseX = col
 		}
+		return m, nil
+	}
+
+	if msg.Action == tea.MouseActionMotion && m.mouseDragging {
 		return m, nil
 	}
 
@@ -1307,13 +1435,13 @@ var (
 )
 
 func (m *AppModel) panelDims() (leftWidth, rightWidth, height int) {
-	const headerRows = 3
 	const footerRows = 1
+	headerRows := m.headerHeight()
 	availHeight := m.termHeight - headerRows - footerRows
 	if availHeight < 1 {
 		availHeight = 1
 	}
-	height = availHeight * m.config.Panel.HeightPercent / 105
+	height = availHeight * m.config.Panel.HeightPercent / 100
 	if height < 1 {
 		height = 1
 	}
@@ -1323,19 +1451,19 @@ func (m *AppModel) panelDims() (leftWidth, rightWidth, height int) {
 
 	if m.leftCollapsed && m.rightCollapsed {
 		leftWidth = m.termWidth / 2
-		rightWidth = m.termWidth - leftWidth - 5
+		rightWidth = m.termWidth - leftWidth - 2
 	} else if m.leftCollapsed {
 		leftWidth = 3
-		rightWidth = m.termWidth - leftWidth - 5
+		rightWidth = m.termWidth - leftWidth - 2
 	} else if m.rightCollapsed {
 		rightWidth = 3
-		leftWidth = m.termWidth - rightWidth - 5
+		leftWidth = m.termWidth - rightWidth - 2
 	} else {
-		leftWidth = m.termWidth * m.runtimeWidthPct / 105
+		leftWidth = m.termWidth * m.runtimeWidthPct / 100
 		if leftWidth < 1 {
 			leftWidth = 40
 		}
-		rightWidth = m.termWidth - leftWidth - 5
+		rightWidth = m.termWidth - leftWidth - 2
 		if rightWidth < 1 {
 			rightWidth = 20
 		}
@@ -1449,17 +1577,43 @@ func (m *AppModel) View() string {
 	case WizardMode:
 		sb.WriteString(m.renderMainPanels())
 	case CommandPaletteMode:
-		sb.WriteString(m.renderCommandPalette())
+		// Show previous mode's panels underneath the overlay
+		switch m.commandPalettePrevMode {
+		case FinderMode:
+			sb.WriteString(m.renderMainPanels())
+		case BrowserMode:
+			sb.WriteString(m.renderBrowserPanels())
+		case TagsMode:
+			sb.WriteString(m.renderTagsPanels())
+		default:
+			sb.WriteString(m.renderMainPanels())
+		}
 	}
 
 	sb.WriteString(footer)
 	baseView := sb.String()
 
-	// Overlay suggestions popup before floating pane
-	if m.mode == WizardMode && !m.wizardLoadingSuggs && m.wizardError == nil && len(m.wizardSuggestions) > 0 {
-		popupContent := m.renderWizardSuggestionsPopup()
-		if popupContent != "" {
-			baseView = m.overlayOnView(baseView, popupContent)
+	// Overlay wizard dialog
+	if m.mode == WizardMode {
+		overlayContent := m.renderWizardOverlay()
+		if overlayContent != "" {
+			baseView = m.overlayOnView(baseView, overlayContent)
+		}
+	}
+
+	// Overlay command palette
+	if m.mode == CommandPaletteMode {
+		overlayContent := m.renderCommandPaletteOverlay()
+		if overlayContent != "" {
+			baseView = m.overlayOnView(baseView, overlayContent)
+		}
+	}
+
+	// Overlay filename prompt
+	if m.filenamePromptActive {
+		overlayContent := m.renderFilenamePromptOverlay()
+		if overlayContent != "" {
+			baseView = m.overlayOnView(baseView, overlayContent)
 		}
 	}
 
@@ -1488,11 +1642,24 @@ func (m *AppModel) renderHeader() string {
 			sb.WriteString(titleStyle.Render("Tags") + "\n")
 		}
 	case WizardMode:
-		sb.WriteString(titleStyle.Render("Form") + "\n")
-		sb.WriteString(m.renderWizardBar() + "\n")
+		sb.WriteString(titleStyle.Render("Fuzzyfinder") + "\n")
+		sb.WriteString(m.finderQuery.View() + "\n")
 	case CommandPaletteMode:
-		sb.WriteString(titleStyle.Render("Command Palette") + "\n")
-		sb.WriteString(m.commandPaletteQuery.View() + "\n")
+		// Show previous mode's header underneath the overlay
+		prevMode := m.commandPalettePrevMode
+		switch prevMode {
+		case FinderMode:
+			sb.WriteString(titleStyle.Render("Fuzzyfinder") + "\n")
+			sb.WriteString(m.finderQuery.View() + "\n")
+		case BrowserMode:
+			sb.WriteString(titleStyle.Render(fmt.Sprintf("Browser: /%s", m.browserPath)) + "\n")
+		case TagsMode:
+			if m.inTagSnippets {
+				sb.WriteString(titleStyle.Render(fmt.Sprintf("Tag: %s", m.selectedTag)) + "\n")
+			} else {
+				sb.WriteString(titleStyle.Render("Tags") + "\n")
+			}
+		}
 	}
 
 	return sb.String()
@@ -1529,29 +1696,41 @@ func (m *AppModel) renderFooter() string {
 			}
 		}
 	case WizardMode:
-		instructions = "Enter/Tab: next  Shift+Tab: back  Esc: cancel  Ctrl+D: quit"
+		instructions = "Ctrl+F: float  Ctrl+D: quit"
 	case CommandPaletteMode:
-		instructions = "Enter: execute  Esc: cancel  ↑↓: navigate"
+		// Show previous mode's footer underneath the overlay
+		prevMode := m.commandPalettePrevMode
+		switch prevMode {
+		case FinderMode:
+			if m.finderFocusedPanel == 0 {
+				instructions = "Enter: wizard  Tab: focus preview  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+			} else {
+				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+			}
+		case BrowserMode:
+			if m.browserFocusedPanel == 0 {
+				instructions = "Enter: open/wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+			} else {
+				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+			}
+		case TagsMode:
+			if m.inTagSnippets {
+				if m.tagSnippetsFocusedPanel == 0 {
+					instructions = "Enter: wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+				} else {
+					instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+				}
+			} else {
+				if m.tagsFocusedPanel == 0 {
+					instructions = "Enter: open  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+				} else {
+					instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+				}
+			}
+		}
 	}
 
-	leftBtn := " ◀ "
-	if m.leftCollapsed {
-		leftBtn = " ▶ "
-	}
-	rightBtn := " ▶ "
-	if m.rightCollapsed {
-		rightBtn = " ◀ "
-	}
-
-	btnStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#1E1E1E")).
-		Background(lipgloss.Color("#AFAF87"))
-
-	leftBtnRendered := btnStyle.Render(leftBtn)
-	rightBtnRendered := btnStyle.Render(rightBtn)
-
-	footerLine := leftBtnRendered + " " + rightBtnRendered + "  " + instructionsStyle.Render(instructions)
+	footerLine := instructionsStyle.Render(instructions)
 
 	return footerLine + "\n"
 }
@@ -1604,6 +1783,110 @@ func (m *AppModel) renderCommandPalette() string {
 	return sb.String()
 }
 
+func (m *AppModel) renderCommandPaletteOverlay() string {
+	filtered := m.getFilteredCommands()
+
+	var body strings.Builder
+
+	body.WriteString(headerStyle.Render("Command Palette"))
+	body.WriteString("\n\n")
+	body.WriteString(m.commandPaletteQuery.View())
+	body.WriteString("\n\n")
+
+	if len(filtered) == 0 {
+		body.WriteString("  No commands found.\n")
+	} else {
+		visible := m.termHeight - 12
+		if visible < 5 {
+			visible = 5
+		}
+		if len(filtered) < visible {
+			visible = len(filtered)
+		}
+
+		start := m.commandPaletteSelected - visible/2
+		if start < 0 {
+			start = 0
+		}
+		end := start + visible
+		if end > len(filtered) {
+			end = len(filtered)
+			start = end - visible
+			if start < 0 {
+				start = 0
+			}
+		}
+
+		for i := start; i < end; i++ {
+			cmd := filtered[i]
+			if i == m.commandPaletteSelected {
+				body.WriteString(selectedItemStyle.Render("▸ "))
+				body.WriteString(selectedItemStyle.Render(cmd.name))
+				body.WriteString("  ")
+				body.WriteString(instructionsStyle.Render(cmd.description))
+			} else {
+				body.WriteString("  ")
+				body.WriteString(normalItemStyle.Render(cmd.name))
+				body.WriteString("  ")
+				body.WriteString(instructionsStyle.Render(cmd.description))
+			}
+			body.WriteString("\n")
+		}
+	}
+
+	body.WriteString("\n")
+	body.WriteString(instructionsStyle.Render("Enter: execute  Esc: cancel  ↑↓: navigate"))
+
+	overlayWidth := m.termWidth - overlayMargin*2
+	if overlayWidth < 40 {
+		overlayWidth = 40
+	}
+	overlayHeight := m.termHeight - overlayMargin*2
+	if overlayHeight < 10 {
+		overlayHeight = 10
+	}
+
+	overlayStyle := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("#5F5FAF")).
+		Background(lipgloss.Color("#1E1E1E")).
+		Width(overlayWidth).
+		Height(overlayHeight).
+		Padding(1, 1)
+
+	return overlayStyle.Render(body.String())
+}
+
+func (m *AppModel) renderFilenamePromptOverlay() string {
+	var body strings.Builder
+
+	body.WriteString(headerStyle.Render("New Strand File"))
+	body.WriteString("\n\n")
+	body.WriteString("Enter a filename for the new strand file:\n\n")
+	body.WriteString(m.filenamePromptInput.View())
+	body.WriteString("\n\n")
+	body.WriteString(instructionsStyle.Render("Enter: create  Esc: cancel"))
+
+	overlayWidth := m.termWidth - overlayMargin*2
+	if overlayWidth < 40 {
+		overlayWidth = 40
+	}
+	overlayHeight := 12
+	if overlayHeight > m.termHeight-overlayMargin*2 {
+		overlayHeight = m.termHeight - overlayMargin*2
+	}
+
+	overlayStyle := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("#5F5FAF")).
+		Background(lipgloss.Color("#1E1E1E")).
+		Width(overlayWidth).
+		Height(overlayHeight).
+		Padding(1, 1)
+
+	return overlayStyle.Render(body.String())
+}
+
 func (m *AppModel) renderSnippetPreview(snip domain.Snippet) string {
 	var md strings.Builder
 	md.WriteString("# " + snip.Name + "\n\n")
@@ -1628,100 +1911,11 @@ func (m *AppModel) renderSnippetPreview(snip domain.Snippet) string {
 	return renderedMD
 }
 
-func (m *AppModel) renderWizardBar() string {
-	p := m.wizardSnippet.Placeholders[m.wizardVarIndex]
-	var bar strings.Builder
-
-	bar.WriteString(headerStyle.Render(fmt.Sprintf("[%d/%d]", m.wizardVarIndex+1, len(m.wizardSnippet.Placeholders))))
-	bar.WriteString(" ")
-	bar.WriteString(m.wizardSnippet.Name)
-	bar.WriteString(" > ")
-	bar.WriteString(headerStyle.Render(p.Name))
-	bar.WriteString(": ")
-	bar.WriteString(m.wizardInput.View())
-
-	if m.wizardLoadingSuggs {
-		bar.WriteString("  Loading...")
-	} else if m.wizardError != nil {
-		bar.WriteString(fmt.Sprintf("  Error: %v", m.wizardError))
-	} else if len(m.wizardSuggestions) > 0 {
-		bar.WriteString("  ")
-		bar.WriteString(headerStyle.Render("suggestions:"))
-		bar.WriteString(headerStyle.Render(" ▾"))
-	}
-
-	return bar.String()
-}
-
-func (m *AppModel) renderWizardSuggestionsPopup() string {
-	if m.wizardLoadingSuggs || m.wizardError != nil || len(m.wizardSuggestions) == 0 {
+func (m *AppModel) renderPreviewForOverlay() string {
+	if m.wizardVarIndex >= len(m.wizardSnippet.Placeholders) {
 		return ""
 	}
-
-	// Compute the width needed for the longest suggestion
-	maxItemLen := 0
-	for _, sug := range m.wizardSuggestions {
-		if len(sug) > maxItemLen {
-			maxItemLen = len(sug)
-		}
-	}
-	popupWidth := maxItemLen + 6
-	if popupWidth < 24 {
-		popupWidth = 24
-	}
-	if popupWidth > m.termWidth-6 {
-		popupWidth = m.termWidth - 6
-	}
-
-	maxVisible := 10
-	if len(m.wizardSuggestions) < maxVisible {
-		maxVisible = len(m.wizardSuggestions)
-	}
-	popupHeight := maxVisible + 2
-
-	// Build the suggestion lines
-	var content strings.Builder
-	start := m.wizardSugSelectedIndex - maxVisible/2
-	if start < 0 {
-		start = 0
-	}
-	end := start + maxVisible
-	if end > len(m.wizardSuggestions) {
-		end = len(m.wizardSuggestions)
-		start = end - maxVisible
-		if start < 0 {
-			start = 0
-		}
-	}
-
-	for i := start; i < end; i++ {
-		sug := m.wizardSuggestions[i]
-		line := "  " + sug
-		if i == m.wizardSugSelectedIndex {
-			line = selectedItemStyle.Render("▸ " + sug)
-		} else {
-			line = normalItemStyle.Render("  " + sug)
-		}
-		content.WriteString(line)
-		if i < end-1 {
-			content.WriteString("\n")
-		}
-	}
-
-	paneStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("#5F5FAF")).
-		Background(lipgloss.Color("#1E1E1E")).
-		Width(popupWidth).
-		Height(popupHeight).
-		Padding(0, 1)
-
-	return paneStyle.Render(content.String())
-}
-
-func (m *AppModel) renderWizardPreview() string {
-	snip := m.wizardSnippet
-	p := snip.Placeholders[m.wizardVarIndex]
+	p := m.wizardSnippet.Placeholders[m.wizardVarIndex]
 
 	previewVals := make(map[string]string)
 	for k, v := range m.wizardConfirmed {
@@ -1730,30 +1924,96 @@ func (m *AppModel) renderWizardPreview() string {
 	if cur := m.wizardInput.Value(); cur != "" {
 		previewVals[p.Name] = cur
 	}
-	r := resolver.NewResolver(m.config, snip, domain.Frontmatter{})
-	renderedCode := r.RenderSnippet(previewVals)
+	r := resolver.NewResolver(m.config, m.wizardSnippet, domain.Frontmatter{})
+	code := r.RenderSnippet(previewVals)
 
-	var md strings.Builder
-	md.WriteString("# " + snip.Name + "\n\n")
-	if len(snip.Tags) > 0 {
-		md.WriteString("**Tags:** " + strings.Join(snip.Tags, ", ") + "\n\n")
+	lines := strings.Split(code, "\n")
+	maxPreview := 5
+	if len(lines) > maxPreview {
+		lines = lines[:maxPreview]
+		lines = append(lines, "...")
 	}
-	if snip.Description != "" {
-		md.WriteString(snip.Description + "\n\n")
-	}
-	md.WriteString("## Code\n\n")
-	md.WriteString("```")
-	if snip.Language != "" {
-		md.WriteString(snip.Language)
-	}
-	md.WriteString("\n" + renderedCode)
-	if !strings.HasSuffix(renderedCode, "\n") {
-		md.WriteString("\n")
-	}
-	md.WriteString("```\n")
+	return strings.Join(lines, "\n")
+}
 
-	renderedMD, _ := mdRenderer.Render(md.String())
-	return renderedMD
+func (m *AppModel) renderWizardOverlay() string {
+	if m.wizardVarIndex >= len(m.wizardSnippet.Placeholders) {
+		return ""
+	}
+	p := m.wizardSnippet.Placeholders[m.wizardVarIndex]
+
+	var body strings.Builder
+
+	// Title: progress + snippet name + variable
+	body.WriteString(headerStyle.Render(fmt.Sprintf("[%d/%d] %s > %s",
+		m.wizardVarIndex+1, len(m.wizardSnippet.Placeholders),
+		m.wizardSnippet.Name, p.Name)))
+	body.WriteString("\n\n")
+
+	// Input line
+	body.WriteString(headerStyle.Render(p.Name))
+	body.WriteString(": ")
+	body.WriteString(m.wizardInput.View())
+	if m.wizardLoadingSuggs {
+		body.WriteString("  Loading...")
+	}
+	body.WriteString("\n")
+
+	// Error
+	if m.wizardError != nil {
+		body.WriteString("\n")
+		body.WriteString("Error: ")
+		body.WriteString(m.wizardError.Error())
+		body.WriteString("\n")
+	}
+
+	// Suggestions
+	if !m.wizardLoadingSuggs && m.wizardError == nil && len(m.wizardSuggestions) > 0 {
+		body.WriteString("\n")
+		body.WriteString(headerStyle.Render("suggestions:"))
+		body.WriteString("\n")
+		for i, sug := range m.wizardSuggestions {
+			if i == m.wizardSugSelectedIndex {
+				body.WriteString(selectedItemStyle.Render("  ▸ " + sug))
+			} else {
+				body.WriteString(normalItemStyle.Render("    " + sug))
+			}
+			body.WriteString("\n")
+		}
+	}
+
+	// Preview
+	previewCode := m.renderPreviewForOverlay()
+	if previewCode != "" {
+		body.WriteString("\n")
+		body.WriteString(headerStyle.Render("── Preview ──"))
+		body.WriteString("\n")
+		body.WriteString(previewCode)
+		body.WriteString("\n")
+	}
+
+	// Instructions
+	body.WriteString("\n")
+	body.WriteString(instructionsStyle.Render("Enter/Tab: next  Shift+Tab: back  Esc: cancel  ↑↓: navigate"))
+
+	overlayWidth := m.termWidth - overlayMargin*2
+	overlayHeight := m.termHeight - overlayMargin*2
+	if overlayWidth < 40 {
+		overlayWidth = 40
+	}
+	if overlayHeight < 10 {
+		overlayHeight = 10
+	}
+
+	overlayStyle := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("#5F5FAF")).
+		Background(lipgloss.Color("#1E1E1E")).
+		Width(overlayWidth).
+		Height(overlayHeight).
+		Padding(1, 1)
+
+	return overlayStyle.Render(body.String())
 }
 
 func (m *AppModel) renderMainPanels() string {
@@ -1783,20 +2043,7 @@ func (m *AppModel) renderMainPanels() string {
 	previewContent := "No strand selected."
 	var previewScrollbar string
 	if m.mode == WizardMode {
-		rendered := m.renderWizardPreview()
-		previewLines := strings.Split(rendered, "\n")
-
-		maxPreviewScroll := len(previewLines) - innerH
-		if maxPreviewScroll < 0 {
-			maxPreviewScroll = 0
-		}
-		if m.wizardPreviewScroll > maxPreviewScroll {
-			m.wizardPreviewScroll = maxPreviewScroll
-		}
-
-		visiblePreviewLines := clipLines(previewLines, m.wizardPreviewScroll, innerH)
-		previewContent = strings.Join(visiblePreviewLines, "\n")
-		previewScrollbar = renderScrollbar(len(previewLines), m.wizardPreviewScroll, innerH, panelHeight)
+		previewContent = "Wizard active — see overlay."
 	} else if len(filtered) > 0 && m.finderSelectedIndex < len(filtered) {
 		rendered := m.renderSnippetPreview(filtered[m.finderSelectedIndex])
 		previewLines := strings.Split(rendered, "\n")
@@ -1833,9 +2080,9 @@ func (m *AppModel) renderMainPanels() string {
 		rightPaneWidth = rightWidth - 1
 	}
 
-	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(panelHeight)
+	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(panelHeight - 2)
 	leftBox := leftPaneStyle.Render(listContent)
-	rightPaneStyle := rightStyle.Width(rightPaneWidth).Height(panelHeight)
+	rightPaneStyle := rightStyle.Width(rightPaneWidth).Height(panelHeight - 2)
 	rightBox := rightPaneStyle.Render(previewContent)
 
 	if leftScrollbar != "" {
@@ -1847,7 +2094,7 @@ func (m *AppModel) renderMainPanels() string {
 		rightBox = lipgloss.JoinHorizontal(lipgloss.Top, rightBox, scrollbarStyle.Render(previewScrollbar))
 	}
 
-	joined := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, "│", rightBox)
+	joined := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, rightBox)
 	return joined + "\n"
 }
 
@@ -1925,9 +2172,9 @@ func (m *AppModel) renderBrowserPanels() string {
 		rightPaneWidth = rightWidth - 1
 	}
 
-	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(panelHeight)
+	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(panelHeight - 2)
 	leftBox := leftPaneStyle.Render(listContent)
-	rightPaneStyle := rightStyle.Width(rightPaneWidth).Height(panelHeight)
+	rightPaneStyle := rightStyle.Width(rightPaneWidth).Height(panelHeight - 2)
 	rightBox := rightPaneStyle.Render(previewContent)
 
 	if leftScrollbar != "" {
@@ -1939,7 +2186,7 @@ func (m *AppModel) renderBrowserPanels() string {
 		rightBox = lipgloss.JoinHorizontal(lipgloss.Top, rightBox, scrollbarStyle.Render(previewScrollbar))
 	}
 
-	joined := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, "│", rightBox)
+	joined := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, rightBox)
 	return joined + "\n"
 }
 
@@ -2054,9 +2301,9 @@ func (m *AppModel) renderTagsPanels() string {
 		rightPaneWidth = rightWidth - 1
 	}
 
-	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(panelHeight)
+	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(panelHeight - 2)
 	leftBox := leftPaneStyle.Render(listContent)
-	rightPaneStyle := rightStyle.Width(rightPaneWidth).Height(panelHeight)
+	rightPaneStyle := rightStyle.Width(rightPaneWidth).Height(panelHeight - 2)
 	rightBox := rightPaneStyle.Render(previewContent)
 
 	if listScrollbar != "" {
@@ -2068,8 +2315,23 @@ func (m *AppModel) renderTagsPanels() string {
 		rightBox = lipgloss.JoinHorizontal(lipgloss.Top, rightBox, scrollbarStyle.Render(previewScrollbar))
 	}
 
-	joined := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, "│", rightBox)
+	joined := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, rightBox)
 	return joined + "\n"
+}
+
+func (m *AppModel) headerHeight() int {
+	switch m.mode {
+	case FinderMode, WizardMode:
+		return 2
+	case CommandPaletteMode:
+		switch m.commandPalettePrevMode {
+		case FinderMode, WizardMode:
+			return 2
+		}
+		return 1
+	default:
+		return 1
+	}
 }
 
 // overlayOnView computes the starting position for the popup and delegates to renderWithFloatingPane's overlay logic.
@@ -2089,20 +2351,18 @@ func (m *AppModel) overlayOnView(baseView string, popupContent string) string {
 		return baseView
 	}
 
-	const headerRows = 3
-	startX := 25
-	// availHeight := m.termHeight - headerRows
-	startY := 0
+	startX := overlayMargin
+	startY := overlayMargin
 	if startX < 0 {
 		startX = 0
 	}
-	if startY < headerRows {
-		startY = headerRows
+	if startY < overlayMargin {
+		startY = overlayMargin
 	}
 	if startY+popupHeight > m.termHeight {
 		startY = m.termHeight - popupHeight
-		if startY < headerRows {
-			startY = headerRows
+		if startY < overlayMargin {
+			startY = overlayMargin
 		}
 	}
 
@@ -2167,7 +2427,7 @@ func (m *AppModel) renderWithFloatingPane(baseView string) string {
 		floatingHeight = m.termHeight - 4
 	}
 
-	const headerRows = 3
+	headerRows := m.headerHeight()
 	startX := (m.termWidth - floatingWidth) / 2
 	availHeight := m.termHeight - headerRows
 	startY := headerRows + (availHeight-floatingHeight)/2

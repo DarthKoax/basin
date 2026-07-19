@@ -23,7 +23,7 @@ func viewContains(view, needle string) bool {
 
 func viewHasSideBySide(view string) bool {
 	clean := stripANSI(view)
-	return strings.Contains(clean, "┐│┌") || strings.Contains(clean, "┐ │ ┌")
+	return strings.Contains(clean, "┐┌") || strings.Contains(clean, "┐ ┌")
 }
 
 func newTestSnippet() domain.Snippet {
@@ -31,7 +31,7 @@ func newTestSnippet() domain.Snippet {
 		Name:         "test-snippet",
 		RelativePath: "test.md",
 		Description:  "A test snippet",
-		Body:         "echo <@var>",
+		Body:         "echo <$var>",
 		Language:     "sh",
 		Placeholders: []domain.Placeholder{{Name: "var", IsCommand: false}},
 	}
@@ -51,19 +51,16 @@ func newTestModelWithWizard(cfg *config.Config, termWidth, termHeight int) *AppM
 	return m
 }
 
-// Test that entering wizard mode renders the wizard bar in the header and the panels below.
+// Test that entering wizard mode renders the wizard overlay.
 func TestWizardOverlayDisplaysBackground(t *testing.T) {
 	cfg := config.DefaultConfig()
 	m := newTestModelWithWizard(cfg, 120, 40)
 	view := m.View()
-	if !viewContains(view, "A test snippet") {
-		t.Fatalf("expected preview to contain snippet description, got: %s", view)
-	}
 	if !viewContains(view, "var:") {
-		t.Fatalf("expected wizard bar to contain variable prompt, got: %s", view)
+		t.Fatalf("expected wizard overlay to contain variable prompt, got: %s", view)
 	}
 	if !viewContains(view, "┌") && !viewContains(view, "│") {
-		t.Fatalf("expected panel borders in view, got: %s", view)
+		t.Fatalf("expected borders in view, got: %s", view)
 	}
 }
 
@@ -87,20 +84,17 @@ func TestWizardPanelLayout(t *testing.T) {
 	}
 }
 
-// Test that wizard bar shows progress and variable name.
-func TestWizardBarContent(t *testing.T) {
+// Test that wizard overlay shows progress and variable name.
+func TestWizardOverlayContent(t *testing.T) {
 	cfg := config.DefaultConfig()
 	m := newTestModelWithWizard(cfg, 120, 50)
 	view := m.View()
 
-	if !viewContains(view, "A test snippet") {
-		t.Fatal("expected preview to be visible")
-	}
 	if !viewContains(view, "[1/1]") {
-		t.Fatal("expected wizard progress in bar")
+		t.Fatal("expected wizard progress in overlay")
 	}
-	if !viewContains(view, "test-snippet > var:") {
-		t.Fatal("expected wizard bar to contain snippet name and variable")
+	if !viewContains(view, "test-snippet > var") {
+		t.Fatal("expected wizard overlay to contain snippet name and variable")
 	}
 }
 
@@ -114,12 +108,12 @@ func TestWizardResizableWidth(t *testing.T) {
 	if !viewContains(view, "var:") {
 		t.Fatal("expected wizard bar content with custom width")
 	}
-	if !viewContains(view, "A test snippet") {
-		t.Fatal("expected preview content with custom width")
+	if !viewContains(view, "[1/1]") {
+		t.Fatal("expected overlay progress with custom width")
 	}
 }
 
-// Test that the wizard header instructions are visible.
+// Test that the wizard overlay instructions are visible.
 func TestWizardShowsFinderHeader(t *testing.T) {
 	cfg := config.DefaultConfig()
 	m := newTestModelWithWizard(cfg, 160, 40)
@@ -128,8 +122,8 @@ func TestWizardShowsFinderHeader(t *testing.T) {
 	if !strings.Contains(view, "BASIN") {
 		t.Fatal("expected header title in wizard view")
 	}
-	if !strings.Contains(view, "Form") {
-		t.Fatal("expected Form mode label in wizard header")
+	if !strings.Contains(view, "Fuzzyfinder") {
+		t.Fatal("expected Fuzzyfinder mode label in wizard header")
 	}
 	if !strings.Contains(view, "Enter/Tab: next") || !strings.Contains(view, "Esc: cancel") {
 		t.Fatal("expected wizard instructions in wizard view")
@@ -646,39 +640,6 @@ func TestPaneCollapse_Keybindings(t *testing.T) {
 
 	if !m.rightCollapsed {
 		t.Fatal("expected right pane to collapse after '}' key")
-	}
-}
-
-func TestFooterContainsCollapseButtons(t *testing.T) {
-	cfg := config.DefaultConfig()
-	snip := newTestSnippet()
-	snippets := []domain.Snippet{snip}
-	files := []domain.SnippetFile{}
-	m := NewAppModel(cfg, nil, snippets, files)
-	m.termWidth = 120
-	m.termHeight = 40
-
-	view := m.View()
-
-	if !viewContains(view, "◀") && !viewContains(view, "▶") {
-		t.Fatal("expected footer to contain collapse button symbols")
-	}
-}
-
-func TestFooterCollapseButtonsChange(t *testing.T) {
-	cfg := config.DefaultConfig()
-	snip := newTestSnippet()
-	snippets := []domain.Snippet{snip}
-	files := []domain.SnippetFile{}
-	m := NewAppModel(cfg, nil, snippets, files)
-	m.termWidth = 120
-	m.termHeight = 40
-
-	m.leftCollapsed = true
-	view := m.View()
-
-	if !viewContains(view, "▶") {
-		t.Fatal("expected footer to show expand button when left pane is collapsed")
 	}
 }
 

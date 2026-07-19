@@ -31,7 +31,7 @@ variables:
 This shows directory contents.
 
 ` + "```sh" + `
-ls -la <@path>
+ls -la <$path>
 ` + "```" + `
 
 ## Read base64 file
@@ -41,7 +41,7 @@ Example preview block
 ` + "```" + `
 
 ` + "```bash" + `
-base64 -d <@file>
+base64 -d <$file>
 ` + "```" + `
 `
 
@@ -114,7 +114,7 @@ func TestSlugify(t *testing.T) {
 }
 
 func TestExtractPlaceholders_Deduplicate(t *testing.T) {
-	body := "echo <@input> <@input> <@other>"
+	body := "echo <$input> <$input> <$other>"
 	variables := map[string]domain.VariableSpec{
 		"input": {Default: strPtr("default")},
 	}
@@ -134,7 +134,7 @@ func TestExtractPlaceholders_Deduplicate(t *testing.T) {
 }
 
 func TestExtractPlaceholders_PipeSeparatedOptions(t *testing.T) {
-	body := "curl -X <@method> <@url>"
+	body := "curl -X <$method> <$url>"
 	variables := map[string]domain.VariableSpec{
 		"method": {
 			Default:     strPtr("GET"),
@@ -187,7 +187,7 @@ func TestExtractPlaceholders_PipeSeparatedOptions(t *testing.T) {
 }
 
 func TestExtractPlaceholders_SelectAndCommandMixed(t *testing.T) {
-	body := "docker run <@image> -p <@port> --volume <@path>"
+	body := "docker run <$image> -p <$port> --volume <$path>"
 	variables := map[string]domain.VariableSpec{
 		"image": {
 			Default:     strPtr("nginx"),
@@ -251,7 +251,7 @@ func TestExtractPlaceholders_SelectWithDollarPrefix(t *testing.T) {
 }
 
 func TestExtractPlaceholders_SelectSinglePipeElementNotSelect(t *testing.T) {
-	body := "<@host>"
+	body := "<$host>"
 	variables := map[string]domain.VariableSpec{
 		"host": {Default: strPtr("localhost")},
 	}
@@ -271,7 +271,7 @@ func TestExtractPlaceholders_SelectSinglePipeElementNotSelect(t *testing.T) {
 }
 
 func TestExtractPlaceholders_SelectWithSpacesInOptions(t *testing.T) {
-	body := "<@env>"
+	body := "<$env>"
 	variables := map[string]domain.VariableSpec{
 		"env": {
 			Default:     strPtr("development"),
@@ -378,7 +378,7 @@ variables:
 Test snippet with custom delimiters.
 
 ` + "```sh" + `
-echo {{@name}} {{@greeting}}
+echo {{$name}} {{$greeting}}
 ` + "```" + `
 `
 
@@ -419,7 +419,7 @@ echo {{@name}} {{@greeting}}
 }
 
 func TestExtractPlaceholders_CustomBoundaries(t *testing.T) {
-	body := "echo {{@name}} {{@greeting}}"
+	body := "echo {{$name}} {{$greeting}}"
 	boundaries := domain.Boundaries{Open: "{{", Close: "}}"}
 	variables := map[string]domain.VariableSpec{
 		"name":     {Default: strPtr("world")},
@@ -441,7 +441,7 @@ func TestExtractPlaceholders_CustomBoundaries(t *testing.T) {
 }
 
 func TestExtractPlaceholders_CustomBoundariesWithSelect(t *testing.T) {
-	body := "{{@method}}"
+	body := "{{$method}}"
 	boundaries := domain.Boundaries{Open: "{{", Close: "}}"}
 	variables := map[string]domain.VariableSpec{
 		"method": {
