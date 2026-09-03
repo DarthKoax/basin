@@ -16,8 +16,7 @@ This file contains the context, requirements, development rules, and codebase ma
 5. **Interactive Variable Resolution (Wizard)**: Interactively prompt the user for placeholder values (like `<$container>` or `<$host>`) sequentially in the TUI, supporting:
    - Built-in suggestions (files, directories).
    - Static suggestion lists (from config/frontmatter).
-   - Command-backed suggestions (evaluated via shell).
-   - Dependent variables (where downstream suggestions rely on upstream inputs, e.g., `<#secret>`).
+    - Command-backed suggestions (evaluated via shell).
 6. **System Clipboard Integration**: Copy the fully rendered strand to the system clipboard upon completion.
 7. **External Editor Support**: Open the source markdown file in the system's default editor (via `Ctrl+E`), returning to the app with previous selection retained.
 8. **Code Block Styling**: Fenced code blocks (```) render with a subtle background colour and monospace font. Inline code (backtick `) renders with a background highlight.
@@ -109,8 +108,6 @@ clipboard.WriteAll() + stdout output
 Placeholders use the `< >` boundary characters (configurable via frontmatter):
 
 - `<$name>` — environment variable reference (falls back to `$name` if not provided)
-- `<#upstream>` — dependent variable reference (shell-quoted on substitution)
-- `<#upstream:raw>` — dependent variable reference (no quoting)
 
 Frontmatter `variables` block can define per-placeholder behaviour:
 
@@ -137,8 +134,7 @@ variables:
 - Every module under `internal/parser`, `internal/resolver`, `internal/config`, and `internal/search` must have `*_test.go` files with high coverage.
 - Write unit tests for:
   - Frontmatter parser and variable spec merging.
-  - Regex placeholder extraction: `<$name>`, `<#upstream>`, `<#upstream:raw>`.
-  - Dependent variable template rendering and shell quoting.
+  - Regex placeholder extraction: `<$name>`.
   - Resolution order logic (Inline -> Config -> Built-ins).
   - Search token parsing and fuzzy matching across name, description, tags, body, and path.
 
