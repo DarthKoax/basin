@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"basin/internal/config"
@@ -89,7 +88,6 @@ func getSnippetRoots(cfg *config.Config) []string {
 			}
 		}
 	}
-
 	home, err := os.UserHomeDir()
 	if err == nil {
 		xdgPath := filepath.Join(home, ".config", "basin", "strands")
@@ -261,28 +259,7 @@ func runLint() {
 			}
 			seenNames[snip.Name] = true
 
-			orderMap := make(map[string]int)
-			for idx, p := range snip.Placeholders {
-				orderMap[p.Name] = idx
-			}
 
-			for _, p := range snip.Placeholders {
-				if p.IsCommand {
-					re := regexp.MustCompile(`<#([a-zA-Z0-9_-]+)>`)
-					matches := re.FindAllStringSubmatch(p.Command, -1)
-					for _, match := range matches {
-						refName := match[1]
-						refIdx, exists := orderMap[refName]
-						if !exists {
-							fmt.Printf("%s: error inside %q: dependent variable reference %q is undeclared\n", f.Path, snip.Name, refName)
-							findings++
-						} else if refIdx >= orderMap[p.Name] {
-							fmt.Printf("%s: error inside %q: forward variable reference to %q is forbidden\n", f.Path, snip.Name, refName)
-							findings++
-						}
-					}
-				}
-			}
 		}
 	}
 
