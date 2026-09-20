@@ -15,7 +15,6 @@ import (
 )
 
 var (
-	dependentRegex  = regexp.MustCompile(`(\\)?<#([a-zA-Z0-9_-]+)(:raw)?>`)
 	cmdSuggestionRe = regexp.MustCompile(`^\$\((.+)\)$`)
 )
 
@@ -45,62 +44,6 @@ func NewResolver(cfg *config.Config, snip domain.Snippet, fm domain.Frontmatter)
 		Snippet:     snip,
 		Frontmatter: fm,
 	}
-}
-
-// ShellQuote wraps a string in single quotes and escapes existing single quotes.
-func ShellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
-}
-
-// ResolveCommandTemplate processes `<#name>` and `<#name:raw>` references in a command template.
-func ResolveCommandTemplate(template string, confirmed map[string]string, boundaries domain.Boundaries) (string, error) {
-	open := boundaries.Open
-	close := boundaries.Close
-	if open == "" {
-		open = "<"
-	}
-	if close == "" {
-		close = ">"
-	}
-
-	openEsc := regexp.QuoteMeta(open)
-	closeEsc := regexp.QuoteMeta(close)
-
-	pattern := `(\\)?` + openEsc + `#([a-zA-Z0-9_-]+)(:raw)?` + closeEsc
-	depRe := regexp.MustCompile(pattern)
-
-	var parseErr error
-	res := depRe.ReplaceAllStringFunc(template, func(match string) string {
-		submatches := depRe.FindStringSubmatch(match)
-		if len(submatches) < 3 {
-			return match
-		}
-
-		escaped := submatches[1] != ""
-		name := submatches[2]
-		isRaw := submatches[3] == ":raw"
-
-		if escaped {
-			// Remove backslash, return literal <#name> or <#name:raw>
-			return match[1:]
-		}
-
-		val, ok := confirmed[name]
-		if !ok {
-			parseErr = fmt.Errorf("dependent variable %q has no confirmed value yet", name)
-			return match
-		}
-
-		if isRaw {
-			return val
-		}
-		return ShellQuote(val)
-	})
-
-	if parseErr != nil {
-		return "", parseErr
-	}
-	return res, nil
 }
 
 // GetDefaultValue returns the resolved default value for a placeholder.
@@ -134,7 +77,7 @@ func (r *Resolver) GetSuggestions(p domain.Placeholder, confirmed map[string]str
 	} else if p.IsSelect && len(p.SelectOptions) > 0 {
 		// Check for $(...) command-backed suggestion
 		if cmd, ok := isCmdSuggestion(p.SelectOptions[0]); ok {
-			return r.runSuggestionCommand(cmd, confirmed)
+			return r.runSuggestionCommand(cmd)
 		}
 		return p.SelectOptions, nil
 	}
@@ -148,7 +91,7 @@ func (r *Resolver) GetSuggestions(p domain.Placeholder, confirmed map[string]str
 			} else if len(cfgVar.Suggestions) > 0 {
 				// Check for $(...) command-backed suggestion
 				if cmd, ok := isCmdSuggestion(cfgVar.Suggestions[0]); ok {
-					return r.runSuggestionCommand(cmd, confirmed)
+					return r.runSuggestionCommand(cmd)
 				}
 				staticList = cfgVar.Suggestions
 				hasStatic = true
@@ -171,32 +114,26 @@ func (r *Resolver) GetSuggestions(p domain.Placeholder, confirmed map[string]str
 	}
 
 	if hasCommand {
-		return r.runSuggestionCommand(commandStr, confirmed)
+		return r.runSuggestionCommand(commandStr)
 	}
 
 	return nil, nil
 }
 
 // runSuggestionCommand executes a bash command and returns its output lines as suggestions.
-// Dependent variables (<#name>, <#name:raw>) are interpolated before execution.
-func (r *Resolver) runSuggestionCommand(commandStr string, confirmed map[string]string) ([]string, error) {
+func (r *Resolver) runSuggestionCommand(commandStr string) ([]string, error) {
 	if !r.Config.SuggestionCommands.AllowCommands {
 		return nil, nil
-	}
-
-	resolvedCmd, err := ResolveCommandTemplate(commandStr, confirmed, r.Snippet.Boundaries)
-	if err != nil {
-		return nil, fmt.Errorf("resolving command template: %w", err)
 	}
 
 	timeout := time.Duration(r.Config.SuggestionCommands.TimeoutMS) * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "bash", "-c", resolvedCmd)
+	cmd := exec.CommandContext(ctx, "bash", "-c", commandStr)
 	outputBytes, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("executing suggestion command %q: %w", resolvedCmd, err)
+		return nil, fmt.Errorf("executing suggestion command %q: %w", commandStr, err)
 	}
 
 	output := string(outputBytes)
@@ -226,30 +163,6 @@ func (r *Resolver) RenderSnippet(confirmed map[string]string) string {
 
 	openEsc := regexp.QuoteMeta(open)
 	closeEsc := regexp.QuoteMeta(close)
-
-	// Replace placeholders <#name> and <#name:raw> with confirmed values.
-	depPattern := `(\\)?` + openEsc + `#([a-zA-Z0-9_-]+)(:raw)?` + closeEsc
-	depRe := regexp.MustCompile(depPattern)
-	body = depRe.ReplaceAllStringFunc(body, func(match string) string {
-		submatches := depRe.FindStringSubmatch(match)
-		if len(submatches) < 3 {
-			return match
-		}
-
-		escaped := submatches[1] != ""
-		name := submatches[2]
-		isRaw := submatches[3] == ":raw"
-
-		if escaped {
-			return match[1:]
-		}
-
-		val := confirmed[name]
-		if isRaw {
-			return val
-		}
-		return ShellQuote(val)
-	})
 
 	// Replace placeholders <$name> with either the provided value, a default, or an env var $NAME.
 	phMap := make(map[string]domain.Placeholder)

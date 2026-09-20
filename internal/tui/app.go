@@ -1482,6 +1482,14 @@ func (m *AppModel) innerContentHeight(panelHeight int) int {
 	return h
 }
 
+func (m *AppModel) paneContentHeight(panelHeight int) int {
+	h := panelHeight - 2
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
+
 func clampScroll(selected, offset, visibleHeight int) int {
 	if visibleHeight <= 0 {
 		return 0
@@ -2031,6 +2039,7 @@ func (m *AppModel) renderMainPanels() string {
 
 	leftWidth, rightWidth, panelHeight := m.panelDims()
 	innerH := m.innerContentHeight(panelHeight)
+	paneH := m.paneContentHeight(panelHeight)
 
 	visibleListLines := clipLines(listLines, m.finderScrollOffset, innerH)
 	listContent := strings.Join(visibleListLines, "\n")
@@ -2038,7 +2047,7 @@ func (m *AppModel) renderMainPanels() string {
 		listContent = "  No matches found."
 	}
 
-	leftScrollbar := renderScrollbar(len(listLines), m.finderScrollOffset, innerH, panelHeight)
+	leftScrollbar := renderScrollbar(len(listLines), m.finderScrollOffset, innerH, innerH)
 
 	previewContent := "No strand selected."
 	var previewScrollbar string
@@ -2058,7 +2067,7 @@ func (m *AppModel) renderMainPanels() string {
 
 		visiblePreviewLines := clipLines(previewLines, m.finderPreviewScroll, innerH)
 		previewContent = strings.Join(visiblePreviewLines, "\n")
-		previewScrollbar = renderScrollbar(len(previewLines), m.finderPreviewScroll, innerH, panelHeight)
+		previewScrollbar = renderScrollbar(len(previewLines), m.finderPreviewScroll, innerH, innerH)
 	}
 
 	leftStyle := previewBorder
@@ -2080,17 +2089,17 @@ func (m *AppModel) renderMainPanels() string {
 		rightPaneWidth = rightWidth - 1
 	}
 
-	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(panelHeight - 2)
+	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(paneH)
 	leftBox := leftPaneStyle.Render(listContent)
-	rightPaneStyle := rightStyle.Width(rightPaneWidth).Height(panelHeight - 2)
+	rightPaneStyle := rightStyle.Width(rightPaneWidth).Height(paneH)
 	rightBox := rightPaneStyle.Render(previewContent)
 
 	if leftScrollbar != "" {
-		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(panelHeight)
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(paneH)
 		leftBox = lipgloss.JoinHorizontal(lipgloss.Top, leftBox, scrollbarStyle.Render(leftScrollbar))
 	}
 	if previewScrollbar != "" {
-		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(panelHeight)
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(paneH)
 		rightBox = lipgloss.JoinHorizontal(lipgloss.Top, rightBox, scrollbarStyle.Render(previewScrollbar))
 	}
 
@@ -2124,6 +2133,7 @@ func (m *AppModel) renderBrowserPanels() string {
 
 	leftWidth, rightWidth, panelHeight := m.panelDims()
 	innerH := m.innerContentHeight(panelHeight)
+	paneH := m.paneContentHeight(panelHeight)
 
 	visibleListLines := clipLines(listLines, m.browserScrollOffset, innerH)
 	listContent := strings.Join(visibleListLines, "\n")
@@ -2131,7 +2141,7 @@ func (m *AppModel) renderBrowserPanels() string {
 		listContent = "  Empty directory."
 	}
 
-	leftScrollbar := renderScrollbar(len(listLines), m.browserScrollOffset, innerH, panelHeight)
+	leftScrollbar := renderScrollbar(len(listLines), m.browserScrollOffset, innerH, innerH)
 
 	previewContent := "No strand selected."
 	var previewScrollbar string
@@ -2151,7 +2161,7 @@ func (m *AppModel) renderBrowserPanels() string {
 
 			visiblePreviewLines := clipLines(previewLines, m.browserPreviewScroll, innerH)
 			previewContent = strings.Join(visiblePreviewLines, "\n")
-			previewScrollbar = renderScrollbar(len(previewLines), m.browserPreviewScroll, innerH, panelHeight)
+			previewScrollbar = renderScrollbar(len(previewLines), m.browserPreviewScroll, innerH, innerH)
 		}
 	}
 
@@ -2172,17 +2182,17 @@ func (m *AppModel) renderBrowserPanels() string {
 		rightPaneWidth = rightWidth - 1
 	}
 
-	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(panelHeight - 2)
+	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(paneH)
 	leftBox := leftPaneStyle.Render(listContent)
-	rightPaneStyle := rightStyle.Width(rightPaneWidth).Height(panelHeight - 2)
+	rightPaneStyle := rightStyle.Width(rightPaneWidth).Height(paneH)
 	rightBox := rightPaneStyle.Render(previewContent)
 
 	if leftScrollbar != "" {
-		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(panelHeight)
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(paneH)
 		leftBox = lipgloss.JoinHorizontal(lipgloss.Top, leftBox, scrollbarStyle.Render(leftScrollbar))
 	}
 	if previewScrollbar != "" {
-		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(panelHeight)
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(paneH)
 		rightBox = lipgloss.JoinHorizontal(lipgloss.Top, rightBox, scrollbarStyle.Render(previewScrollbar))
 	}
 
@@ -2193,6 +2203,7 @@ func (m *AppModel) renderBrowserPanels() string {
 func (m *AppModel) renderTagsPanels() string {
 	leftWidth, rightWidth, panelHeight := m.panelDims()
 	innerH := m.innerContentHeight(panelHeight)
+	paneH := m.paneContentHeight(panelHeight)
 
 	var listLines []string
 	var previewContent string
@@ -2216,7 +2227,7 @@ func (m *AppModel) renderTagsPanels() string {
 			listContent = "  No strands in tag."
 		}
 
-		listScrollbar = renderScrollbar(len(listLines), m.tagSnippetsScrollOffset, innerH, panelHeight)
+		listScrollbar = renderScrollbar(len(listLines), m.tagSnippetsScrollOffset, innerH, innerH)
 
 		previewContent = "No strand selected."
 		if len(m.tagSnippets) > 0 && m.tagSnippetsSelectedIndex < len(m.tagSnippets) {
@@ -2233,7 +2244,7 @@ func (m *AppModel) renderTagsPanels() string {
 
 			visiblePreviewLines := clipLines(previewLines, m.tagSnippetsPreviewScroll, innerH)
 			previewContent = strings.Join(visiblePreviewLines, "\n")
-			previewScrollbar = renderScrollbar(len(previewLines), m.tagSnippetsPreviewScroll, innerH, panelHeight)
+			previewScrollbar = renderScrollbar(len(previewLines), m.tagSnippetsPreviewScroll, innerH, innerH)
 		}
 	} else {
 		for i, tag := range m.tags {
@@ -2252,7 +2263,7 @@ func (m *AppModel) renderTagsPanels() string {
 			listContent = "  No tags found."
 		}
 
-		listScrollbar = renderScrollbar(len(listLines), m.tagsScrollOffset, innerH, panelHeight)
+		listScrollbar = renderScrollbar(len(listLines), m.tagsScrollOffset, innerH, innerH)
 
 		previewContent = "Select a tag to see strands."
 		if len(m.tags) > 0 && m.tagsSelectedIndex < len(m.tags) {
@@ -2272,7 +2283,7 @@ func (m *AppModel) renderTagsPanels() string {
 
 			visiblePreviewLines := clipLines(previewLines, m.tagsPreviewScroll, innerH)
 			previewContent = strings.Join(visiblePreviewLines, "\n")
-			previewScrollbar = renderScrollbar(len(previewLines), m.tagsPreviewScroll, innerH, panelHeight)
+			previewScrollbar = renderScrollbar(len(previewLines), m.tagsPreviewScroll, innerH, innerH)
 		}
 	}
 
@@ -2301,17 +2312,17 @@ func (m *AppModel) renderTagsPanels() string {
 		rightPaneWidth = rightWidth - 1
 	}
 
-	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(panelHeight - 2)
+	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(paneH)
 	leftBox := leftPaneStyle.Render(listContent)
-	rightPaneStyle := rightStyle.Width(rightPaneWidth).Height(panelHeight - 2)
+	rightPaneStyle := rightStyle.Width(rightPaneWidth).Height(paneH)
 	rightBox := rightPaneStyle.Render(previewContent)
 
 	if listScrollbar != "" {
-		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(panelHeight)
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(paneH)
 		leftBox = lipgloss.JoinHorizontal(lipgloss.Top, leftBox, scrollbarStyle.Render(listScrollbar))
 	}
 	if previewScrollbar != "" {
-		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(panelHeight)
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(paneH)
 		rightBox = lipgloss.JoinHorizontal(lipgloss.Top, rightBox, scrollbarStyle.Render(previewScrollbar))
 	}
 
@@ -2322,13 +2333,13 @@ func (m *AppModel) renderTagsPanels() string {
 func (m *AppModel) headerHeight() int {
 	switch m.mode {
 	case FinderMode, WizardMode:
-		return 2
+		return 4
 	case CommandPaletteMode:
 		switch m.commandPalettePrevMode {
 		case FinderMode, WizardMode:
-			return 2
+			return 4
 		}
-		return 1
+		return 4
 	default:
 		return 1
 	}
