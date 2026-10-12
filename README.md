@@ -129,6 +129,16 @@ Strand roots are discovered from (in order):
 | **Wizard** | Interactive variable resolution | `Enter/Tab`: next var, `Shift+Tab`: prev var, `Esc`: cancel |
 | **Command Palette** | Quick command access | `Ctrl+P`: open, `Enter`: execute, `Esc`: close |
 
+## Tmux Popup Integration
+
+Add this to your `~/.tmux.conf` to open Basin in a tmux popup:
+
+```tmux
+bind-key ` display-popup -w 80% -h 80% -E 'bash -c "exec /home/koax/code/basin/main"'
+```
+
+Then press `<prefix> + `` to launch Basin in a floating popup.
+
 ## Development
 
 ```bash
@@ -142,4 +152,3 @@ golangci-lint run        # lint (if installed)
 ## License
 
 MIT
-bob

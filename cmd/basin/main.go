@@ -18,12 +18,17 @@ var (
 	flagNoStdout    bool
 	flagNoClipboard bool
 	flagNoAutoCopy  bool
+	flagVersion     bool
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "basin",
 	Short: "Basin - interactive terminal strand manager",
 	Run: func(cmd *cobra.Command, args []string) {
+		if flagVersion {
+			fmt.Printf("basin version %s\n", Version)
+			return
+		}
 		runExecute()
 	},
 }
@@ -60,6 +65,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&flagNoStdout, "no-stdout", false, "disable printing the strand to stdout on completion")
 	rootCmd.PersistentFlags().BoolVar(&flagNoClipboard, "no-clipboard", false, "disable copying the strand to clipboard on completion")
 	rootCmd.PersistentFlags().BoolVar(&flagNoAutoCopy, "no-auto-copy", false, "disable auto-copying strand body to clipboard when highlighted")
+	rootCmd.Flags().BoolVar(&flagVersion, "version", false, "print basin version and exit")
 }
 
 func main() {

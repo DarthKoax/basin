@@ -8,13 +8,12 @@ import (
 	"runtime"
 	"strings"
 
+	"basin/internal/clipboard"
 	"basin/internal/config"
 	"basin/internal/domain"
 	"basin/internal/parser"
 	"basin/internal/resolver"
 	"basin/internal/search"
-
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
@@ -138,6 +137,9 @@ type AppModel struct {
 	mouseDragging bool
 	mouseDownRow  int
 
+	clipboardErr    error
+	clipboardWarn   string
+
 	filenamePromptActive bool
 	filenamePromptInput  textinput.Model
 	filenamePromptRoot   string
@@ -189,6 +191,14 @@ func NewAppModel(cfg *config.Config, roots []string, snippets []domain.Snippet, 
 	m.initBrowser()
 	m.initTags()
 	m.initCommands()
+
+	if cfg.Output.Clipboard || cfg.Behavior.AutoCopyOnSelect {
+		if tool, err := clipboard.DetectClipboardTool(); err != nil {
+			m.clipboardWarn = fmt.Sprintf("Clipboard unavailable: %v", err)
+		} else {
+			_ = tool
+		}
+	}
 
 	return m
 }
@@ -463,7 +473,9 @@ func (m *AppModel) finalizeSnippet(body string) tea.Cmd {
 	m.Done = true
 	m.FinalSnippet = body
 	if m.config.Output.Clipboard {
-		_ = clipboard.WriteAll(body)
+		if err := clipboard.WriteAll(body); err != nil {
+			m.clipboardErr = fmt.Errorf("clipboard copy failed: %w", err)
+		}
 	}
 	return tea.Quit
 }
@@ -493,7 +505,9 @@ func (m *AppModel) autoCopyCurrentSnippet() {
 	}
 	if body != "" && body != m.lastAutoCopyBody {
 		m.lastAutoCopyBody = body
-		_ = clipboard.WriteAll(body)
+		if err := clipboard.WriteAll(body); err != nil {
+			m.clipboardErr = fmt.Errorf("auto-copy failed: %w", err)
+		}
 	}
 }
 
@@ -552,7 +566,9 @@ func (m *AppModel) copyPreviewRange(row1, row2 int) {
 		}
 		selected.WriteString(ansi.Strip(lines[i]))
 	}
-	_ = clipboard.WriteAll(selected.String())
+	if err := clipboard.WriteAll(selected.String()); err != nil {
+		m.clipboardErr = fmt.Errorf("preview copy failed: %w", err)
+	}
 }
 
 func getEditorCommand() (string, []string) {
@@ -1565,6 +1581,11 @@ func renderScrollbar(totalLines, scrollOffset, visibleHeight, panelHeight int) s
 
 func (m *AppModel) View() string {
 	if m.Done {
+		if m.clipboardErr != nil {
+			tool, _ := clipboard.DetectClipboardTool()
+			return fmt.Sprintf("Clipboard error: %v\nDetected tool: %s\nDISPLAY=%s WAYLAND_DISPLAY=%s\n\n%s\n",
+				m.clipboardErr, tool, os.Getenv("DISPLAY"), os.Getenv("WAYLAND_DISPLAY"), m.FinalSnippet)
+		}
 		return fmt.Sprintf("Strand copied to clipboard!\n\n%s\n", m.FinalSnippet)
 	}
 
@@ -1740,7 +1761,11 @@ func (m *AppModel) renderFooter() string {
 
 	footerLine := instructionsStyle.Render(instructions)
 
-	return footerLine + "\n"
+	result := footerLine + "\n"
+	if m.clipboardWarn != "" {
+		result += m.clipboardWarn + "\n"
+	}
+	return result
 }
 
 func (m *AppModel) renderCommandPalette() string {

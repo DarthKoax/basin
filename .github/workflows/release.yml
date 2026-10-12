@@ -22,7 +22,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.26'
           cache: true
 
       - name: Download dependencies
@@ -47,7 +47,7 @@ jobs:
             fi
 
             echo "Building $output_name..."
-            GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="-s -w -X main.version=${VERSION}" -o "dist/${output_name}" ./cmd/basin
+            GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="-s -w -X main.Version=${VERSION}" -o "dist/${output_name}" ./cmd/basin
           done
 
       - name: Create checksums
