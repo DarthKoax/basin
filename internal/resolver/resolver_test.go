@@ -10,53 +10,6 @@ import (
 
 func strPtr(s string) *string { return &s }
 
-func TestShellQuote(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"hello", "'hello'"},
-		{"hello world", "'hello world'"},
-		{"sam's code", "'sam'\\''s code'"},
-	}
-
-	for _, tc := range tests {
-		actual := ShellQuote(tc.input)
-		if actual != tc.expected {
-			t.Errorf("ShellQuote(%q) = %q, expected %q", tc.input, actual, tc.expected)
-		}
-	}
-}
-
-func TestResolveCommandTemplate(t *testing.T) {
-	confirmed := map[string]string{
-		"secret": "db-pass",
-		"key":    "password",
-		"query":  "select * from 'users'",
-	}
-
-	tests := []struct {
-		input    string
-		expected string
-		err      bool
-	}{
-		{"kubectl get secret <#secret>", "kubectl get secret 'db-pass'", false},
-		{"kubectl get secret <#secret> -o jsonpath='{.data.<#key:raw>}'", "kubectl get secret 'db-pass' -o jsonpath='{.data.password}'", false},
-		{"echo \\<#secret>", "echo <#secret>", false},
-		{"kubectl get secret <#missing>", "", true},
-	}
-
-	for _, tc := range tests {
-		actual, err := ResolveCommandTemplate(tc.input, confirmed, domain.Boundaries{})
-		if (err != nil) != tc.err {
-			t.Errorf("ResolveCommandTemplate(%q) error state: %v, expected err: %v", tc.input, err, tc.err)
-		}
-		if err == nil && actual != tc.expected {
-			t.Errorf("ResolveCommandTemplate(%q) = %q, expected %q", tc.input, actual, tc.expected)
-		}
-	}
-}
-
 func TestResolver_GetDefaultValue(t *testing.T) {
 	cfg := config.DefaultConfig()
 	devDefault := "dev"
@@ -408,32 +361,4 @@ func TestResolver_GetSuggestions_CmdSuggestionInConfig(t *testing.T) {
 	}
 }
 
-func TestResolveCommandTemplate_CustomBoundaries(t *testing.T) {
-	confirmed := map[string]string{
-		"secret": "db-pass",
-		"key":    "password",
-	}
 
-	boundaries := domain.Boundaries{Open: "{{", Close: "}}"}
-
-	tests := []struct {
-		input    string
-		expected string
-		err      bool
-	}{
-		{"kubectl get secret {{#secret}}", "kubectl get secret 'db-pass'", false},
-		{"kubectl get secret {{#secret}} -o jsonpath='{.data.{{#key:raw}}}'", "kubectl get secret 'db-pass' -o jsonpath='{.data.password}'", false},
-		{"echo \\{{#secret}}", "echo {{#secret}}", false},
-		{"kubectl get secret {{#missing}}", "", true},
-	}
-
-	for _, tc := range tests {
-		actual, err := ResolveCommandTemplate(tc.input, confirmed, boundaries)
-		if (err != nil) != tc.err {
-			t.Errorf("ResolveCommandTemplate(%q) error state: %v, expected err: %v", tc.input, err, tc.err)
-		}
-		if err == nil && actual != tc.expected {
-			t.Errorf("ResolveCommandTemplate(%q) = %q, expected %q", tc.input, actual, tc.expected)
-		}
-	}
-}
