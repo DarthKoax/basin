@@ -1,6 +1,7 @@
 package search
 
 import (
+	"sort"
 	"strings"
 
 	"basin/internal/domain"
@@ -105,4 +106,24 @@ func FilterSnippets(snippets []domain.Snippet, query string) []domain.Snippet {
 		}
 	}
 	return matched
+}
+
+type UseCountGetter func(snippetID string) int
+
+// SortByUsage sorts snippets by usage count (descending), then by original order.
+func SortByUsage(snippets []domain.Snippet, getUseCount UseCountGetter) []domain.Snippet {
+	if len(snippets) == 0 {
+		return snippets
+	}
+	
+	sorted := make([]domain.Snippet, len(snippets))
+	copy(sorted, snippets)
+	
+	sort.SliceStable(sorted, func(i, j int) bool {
+		countI := getUseCount(sorted[i].ID)
+		countJ := getUseCount(sorted[j].ID)
+		return countI > countJ
+	})
+	
+	return sorted
 }

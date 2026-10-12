@@ -158,6 +158,7 @@ func TestWizardSelectPlaceholder_SuggestionsRendered(t *testing.T) {
 	snippets := []domain.Snippet{snip}
 
 	m := NewAppModel(cfg, nil, snippets, files)
+	m.history = nil
 	m.mode = WizardMode
 	m.wizardSnippet = snip
 	m.wizardVarIndex = 0
