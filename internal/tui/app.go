@@ -11,6 +11,7 @@ import (
 	"basin/internal/clipboard"
 	"basin/internal/config"
 	"basin/internal/domain"
+	"basin/internal/history"
 	"basin/internal/parser"
 	"basin/internal/resolver"
 	"basin/internal/search"
@@ -74,6 +75,7 @@ type AppModel struct {
 	strandRoots  []string
 	allSnippets  []domain.Snippet
 	snippetFiles []domain.SnippetFile
+	history      *history.History
 	err          error
 
 	Done         bool
@@ -172,12 +174,18 @@ func NewAppModel(cfg *config.Config, roots []string, snippets []domain.Snippet, 
 	fpInput := textinput.New()
 	fpInput.Placeholder = "strand-name"
 
+	hist, err := history.Load()
+	if err != nil {
+		hist = history.New()
+	}
+
 	m := &AppModel{
 		mode:                   FinderMode,
 		config:                 cfg,
 		strandRoots:            roots,
 		allSnippets:            snippets,
 		snippetFiles:           files,
+		history:                hist,
 		finderQuery:            ti,
 		wizardInput:            wInput,
 		wizardConfirmed:        make(map[string]string),
@@ -349,7 +357,7 @@ func (m *AppModel) initCommands() {
 				var snip domain.Snippet
 				switch m.commandPalettePrevMode {
 				case FinderMode:
-					filtered := search.FilterSnippets(m.allSnippets, m.finderQuery.Value())
+					filtered := m.filteredSnippets()
 					if len(filtered) > 0 && m.finderSelectedIndex < len(filtered) {
 						snip = filtered[m.finderSelectedIndex]
 					}
@@ -425,6 +433,14 @@ func (m *AppModel) frontmatterForSnippet(snip domain.Snippet) domain.Frontmatter
 	return domain.Frontmatter{}
 }
 
+func (m *AppModel) filteredSnippets() []domain.Snippet {
+	filtered := search.FilterSnippets(m.allSnippets, m.finderQuery.Value())
+	if m.history != nil && m.finderQuery.Value() == "" {
+		filtered = search.SortByUsage(filtered, m.history.GetUseCount)
+	}
+	return filtered
+}
+
 func (m *AppModel) setupWizardForCurrentVar() tea.Cmd {
 	fm := m.frontmatterForSnippet(m.wizardSnippet)
 
@@ -438,6 +454,16 @@ func (m *AppModel) setupWizardForCurrentVar() tea.Cmd {
 	r := resolver.NewResolver(m.config, m.wizardSnippet, fm)
 
 	defVal := r.GetDefaultValue(p)
+	
+	if m.history != nil {
+		lastUsed := m.history.GetLastUsedValues(m.wizardSnippet.ID)
+		if lastUsed != nil {
+			if histVal, ok := lastUsed[p.Name]; ok && histVal != "" {
+				defVal = histVal
+			}
+		}
+	}
+	
 	m.wizardInput.SetValue(defVal)
 	m.wizardInput.Placeholder = fmt.Sprintf("Value for %s...", p.Name)
 	m.wizardInput.Width = 30
@@ -472,6 +498,14 @@ func (m *AppModel) setupWizardForCurrentVar() tea.Cmd {
 func (m *AppModel) finalizeSnippet(body string) tea.Cmd {
 	m.Done = true
 	m.FinalSnippet = body
+	
+	if m.history != nil {
+		m.history.RecordUsage(m.wizardSnippet.ID, m.wizardConfirmed)
+		if err := m.history.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to save history: %v\n", err)
+		}
+	}
+	
 	if m.config.Output.Clipboard {
 		if err := clipboard.WriteAll(body); err != nil {
 			m.clipboardErr = fmt.Errorf("clipboard copy failed: %w", err)
@@ -487,7 +521,7 @@ func (m *AppModel) autoCopyCurrentSnippet() {
 	var body string
 	switch m.mode {
 	case FinderMode:
-		filtered := search.FilterSnippets(m.allSnippets, m.finderQuery.Value())
+		filtered := m.filteredSnippets()
 		if m.finderSelectedIndex >= 0 && m.finderSelectedIndex < len(filtered) {
 			body = filtered[m.finderSelectedIndex].Body
 		}
@@ -523,7 +557,7 @@ func (m *AppModel) copyPreviewRange(row1, row2 int) {
 	var rendered string
 	switch m.mode {
 	case FinderMode:
-		filtered := search.FilterSnippets(m.allSnippets, m.finderQuery.Value())
+		filtered := m.filteredSnippets()
 		if len(filtered) > 0 && m.finderSelectedIndex < len(filtered) {
 			rendered = m.renderSnippetPreview(filtered[m.finderSelectedIndex])
 			previewScroll = m.finderPreviewScroll
@@ -589,7 +623,7 @@ func getEditorCommand() (string, []string) {
 func (m *AppModel) getSourceFileForCurrentSelection() string {
 	switch m.mode {
 	case FinderMode:
-		filtered := search.FilterSnippets(m.allSnippets, m.finderQuery.Value())
+		filtered := m.filteredSnippets()
 		if len(filtered) > 0 && m.finderSelectedIndex < len(filtered) {
 			return filtered[m.finderSelectedIndex].SourceFile
 		}
@@ -659,7 +693,7 @@ func (m *AppModel) reloadStrands() {
 func (m *AppModel) retainSelectionAfterReload() {
 	switch m.mode {
 	case FinderMode:
-		filtered := search.FilterSnippets(m.allSnippets, m.finderQuery.Value())
+		filtered := m.filteredSnippets()
 		if m.finderSelectedIndex >= len(filtered) {
 			m.finderSelectedIndex = 0
 		}
@@ -879,7 +913,7 @@ func (m *AppModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	switch m.mode {
 	case FinderMode:
-		filtered := search.FilterSnippets(m.allSnippets, m.finderQuery.Value())
+		filtered := m.filteredSnippets()
 		if col < leftWidth+2 && row >= m.listTopOffset && row < m.listTopOffset+innerH {
 			idx := m.finderScrollOffset + (row - m.listTopOffset)
 			if idx >= 0 && idx < len(filtered) {
@@ -1028,7 +1062,7 @@ func (m *AppModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 func (m *AppModel) updateFinder(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
-	filtered := search.FilterSnippets(m.allSnippets, m.finderQuery.Value())
+	filtered := m.filteredSnippets()
 	_, _, panelHeight := m.panelDims()
 	visibleH := m.innerContentHeight(panelHeight)
 
@@ -2050,7 +2084,7 @@ func (m *AppModel) renderWizardOverlay() string {
 }
 
 func (m *AppModel) renderMainPanels() string {
-	filtered := search.FilterSnippets(m.allSnippets, m.finderQuery.Value())
+	filtered := m.filteredSnippets()
 
 	var listLines []string
 	for i, snip := range filtered {
