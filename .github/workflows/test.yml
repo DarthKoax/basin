@@ -2,34 +2,54 @@ name: Test
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
+
+permissions:
+  contents: read
 
 jobs:
   test:
-    name: Test & Vet
+    name: Test
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: ["1.26"]
+        go-version: ['1.26']
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Set up Go ${{ matrix.go-version }}
+      - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
+          cache: true
 
       - name: Download dependencies
         run: go mod download
 
-      - name: Vet
-        run: go vet ./...
+      - name: Verify dependencies
+        run: go mod verify
 
       - name: Build
         run: go build ./...
 
-      - name: Test
-        run: go test -race -count=1 ./...
+      - name: Vet
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test ./... -v -race -coverprofile=coverage.out -covermode=atomic
+
+      - name: Report coverage
+        run: |
+          coverage=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Total coverage: ${coverage}%"
+
+      - name: Upload coverage
+        if: matrix.go-version == '1.26'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.out
