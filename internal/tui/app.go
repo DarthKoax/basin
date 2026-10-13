@@ -886,7 +886,7 @@ echo <$message>
 			}
 			lines = append(lines, "")
 			lines = append(lines, "Press Esc, Enter, or ? to dismiss")
-			m.showFloatingPane("Keyboard Shortcuts", lines, 60, len(lines)+6)
+			m.showFloatingPane("Keyboard Shortcuts", lines, 60, len(lines)+10)
 			return m, nil
 		case "[", "{":
 			if msg.String() == "{" {
@@ -2621,8 +2621,24 @@ func (m *AppModel) renderWithFloatingPane(baseView string) string {
 		contentBuilder.WriteString(line + "\n")
 	}
 
-	renderedContent := floatingPaneStyle.Render(contentBuilder.String())
+	contentStr := contentBuilder.String()
+	contentLineCount := strings.Count(contentStr, "\n")
+	targetLineCount := floatingHeight - 2
+	for contentLineCount < targetLineCount {
+		contentStr += "\n"
+		contentLineCount++
+	}
+
+	renderedContent := floatingPaneStyle.Render(contentStr)
 	contentLines := strings.Split(renderedContent, "\n")
+	
+	for len(contentLines) < floatingHeight {
+		emptyLine := lipgloss.NewStyle().
+			Width(floatingWidth-2).
+			Background(lipgloss.Color("#1E1E1E")).
+			Render(" ")
+		contentLines = append(contentLines, emptyLine)
+	}
 
 	var result strings.Builder
 	for i := 0; i < m.termHeight; i++ {

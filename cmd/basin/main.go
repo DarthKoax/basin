@@ -71,7 +71,7 @@ func init() {
 
 func init() {
 	if Version == "" {
-		Version = "0.3.1"
+		Version = "0.3.2"
 	}
 }
 
