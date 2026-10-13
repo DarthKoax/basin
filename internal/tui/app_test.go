@@ -827,22 +827,11 @@ func TestHelpOverlay_Keybinding(t *testing.T) {
 		t.Fatal("expected floating pane to be active after pressing ?")
 	}
 
-	if m.floatingPane.title != "Help" {
-		t.Errorf("expected floating pane title to be 'Help', got %q", m.floatingPane.title)
+	if m.floatingPane.title != "Keyboard Shortcuts" {
+		t.Errorf("expected floating pane title to be 'Keyboard Shortcuts', got %q", m.floatingPane.title)
 	}
 
 	if len(m.floatingPane.content) == 0 {
 		t.Fatal("expected floating pane content to be non-empty")
-	}
-
-	hasKeyboardShortcuts := false
-	for _, line := range m.floatingPane.content {
-		if strings.Contains(line, "Keyboard Shortcuts") {
-			hasKeyboardShortcuts = true
-			break
-		}
-	}
-	if !hasKeyboardShortcuts {
-		t.Error("expected floating pane content to contain 'Keyboard Shortcuts'")
 	}
 }
