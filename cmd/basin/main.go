@@ -19,6 +19,7 @@ var (
 	flagNoClipboard bool
 	flagNoAutoCopy  bool
 	flagVersion     bool
+	Version         string
 )
 
 var rootCmd = &cobra.Command{
@@ -66,6 +67,12 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&flagNoClipboard, "no-clipboard", false, "disable copying the strand to clipboard on completion")
 	rootCmd.PersistentFlags().BoolVar(&flagNoAutoCopy, "no-auto-copy", false, "disable auto-copying strand body to clipboard when highlighted")
 	rootCmd.Flags().BoolVar(&flagVersion, "version", false, "print basin version and exit")
+}
+
+func init() {
+	if Version == "" {
+		Version = "0.3.2"
+	}
 }
 
 func main() {

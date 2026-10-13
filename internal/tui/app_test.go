@@ -158,6 +158,7 @@ func TestWizardSelectPlaceholder_SuggestionsRendered(t *testing.T) {
 	snippets := []domain.Snippet{snip}
 
 	m := NewAppModel(cfg, nil, snippets, files)
+	m.history = nil
 	m.mode = WizardMode
 	m.wizardSnippet = snip
 	m.wizardVarIndex = 0
@@ -702,5 +703,135 @@ func TestAutoCopyOnSelect_DisabledByDefault(t *testing.T) {
 	cfg := config.DefaultConfig()
 	if cfg.Behavior.AutoCopyOnSelect {
 		t.Fatal("expected AutoCopyOnSelect to be disabled by default")
+	}
+}
+
+func TestHelpOverlay_FinderMode(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snip := domain.Snippet{
+		Name:         "test",
+		RelativePath: "test.md",
+		Body:         "echo test",
+		Language:     "sh",
+	}
+	m := NewAppModel(cfg, nil, []domain.Snippet{snip}, nil)
+	m.mode = FinderMode
+	m.termWidth = 120
+	m.termHeight = 40
+
+	modeName, bindings := m.getModeKeybindings()
+	if modeName != "FINDER" {
+		t.Errorf("expected mode name FINDER, got %q", modeName)
+	}
+	if len(bindings) == 0 {
+		t.Fatal("expected bindings to be non-empty")
+	}
+	
+	foundCtrlP := false
+	for _, b := range bindings {
+		if b[0] == "Ctrl+P" {
+			foundCtrlP = true
+			break
+		}
+	}
+	if !foundCtrlP {
+		t.Error("expected to find Ctrl+P in Finder mode bindings")
+	}
+}
+
+func TestHelpOverlay_WizardMode(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snip := newTestSnippet()
+	m := NewAppModel(cfg, nil, []domain.Snippet{snip}, nil)
+	m.mode = WizardMode
+	m.wizardSnippet = snip
+	m.wizardVarIndex = 0
+	m.wizardConfirmed = make(map[string]string)
+
+	modeName, bindings := m.getModeKeybindings()
+	if modeName != "WIZARD" {
+		t.Errorf("expected mode name WIZARD, got %q", modeName)
+	}
+	if len(bindings) == 0 {
+		t.Fatal("expected bindings to be non-empty")
+	}
+	
+	foundTab := false
+	foundEsc := false
+	for _, b := range bindings {
+		if b[0] == "Tab" {
+			foundTab = true
+		}
+		if b[0] == "Esc" {
+			foundEsc = true
+		}
+	}
+	if !foundTab {
+		t.Error("expected to find Tab in Wizard mode bindings")
+	}
+	if !foundEsc {
+		t.Error("expected to find Esc in Wizard mode bindings")
+	}
+}
+
+func TestHelpOverlay_CommandPaletteMode(t *testing.T) {
+	cfg := config.DefaultConfig()
+	m := NewAppModel(cfg, nil, nil, nil)
+	m.mode = CommandPaletteMode
+	m.commandPalettePrevMode = FinderMode
+
+	modeName, bindings := m.getModeKeybindings()
+	if modeName != "COMMAND PALETTE" {
+		t.Errorf("expected mode name COMMAND PALETTE, got %q", modeName)
+	}
+	if len(bindings) == 0 {
+		t.Fatal("expected bindings to be non-empty")
+	}
+}
+
+func TestHelpOverlay_TagsMode_InTagSnippets(t *testing.T) {
+	cfg := config.DefaultConfig()
+	m := NewAppModel(cfg, nil, nil, nil)
+	m.mode = TagsMode
+	m.inTagSnippets = true
+
+	modeName, bindings := m.getModeKeybindings()
+	if modeName != "TAGS > STRANDS" {
+		t.Errorf("expected mode name TAGS > STRANDS, got %q", modeName)
+	}
+	if len(bindings) == 0 {
+		t.Fatal("expected bindings to be non-empty")
+	}
+}
+
+func TestHelpOverlay_Keybinding(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snip := domain.Snippet{
+		Name:         "test",
+		RelativePath: "test.md",
+		Body:         "echo test",
+		Language:     "sh",
+	}
+	m := NewAppModel(cfg, nil, []domain.Snippet{snip}, nil)
+	m.mode = FinderMode
+	m.termWidth = 120
+	m.termHeight = 40
+
+	if m.floatingPane.active {
+		t.Fatal("expected floating pane to be inactive initially")
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+
+	if !m.floatingPane.active {
+		t.Fatal("expected floating pane to be active after pressing ?")
+	}
+
+	if m.floatingPane.title != "Keyboard Shortcuts" {
+		t.Errorf("expected floating pane title to be 'Keyboard Shortcuts', got %q", m.floatingPane.title)
+	}
+
+	if len(m.floatingPane.content) == 0 {
+		t.Fatal("expected floating pane content to be non-empty")
 	}
 }
