@@ -879,17 +879,14 @@ echo <$message>
 			}, 50, 12)
 			return m, nil
 		case "?":
-			modeName, bindings := m.getModeKeybindings()
-			lines := []string{
-				fmt.Sprintf("Keyboard Shortcuts - %s", modeName),
-				"",
-			}
+			_, bindings := m.getModeKeybindings()
+			lines := []string{}
 			for _, b := range bindings {
 				lines = append(lines, fmt.Sprintf("  %-15s %s", b[0], b[1]))
 			}
 			lines = append(lines, "")
 			lines = append(lines, "Press Esc, Enter, or ? to dismiss")
-			m.showFloatingPane("Help", lines, 60, len(lines)+4)
+			m.showFloatingPane("Keyboard Shortcuts", lines, 60, len(lines)+6)
 			return m, nil
 		case "[", "{":
 			if msg.String() == "{" {
