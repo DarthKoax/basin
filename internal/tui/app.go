@@ -411,6 +411,86 @@ func (m *AppModel) initCommands() {
 	}
 }
 
+func (m *AppModel) getModeKeybindings() (string, [][2]string) {
+	switch m.mode {
+	case FinderMode:
+		return "FINDER", [][2]string{
+			{"↑/↓", "Navigate strands"},
+			{"Enter", "Start wizard for selected strand"},
+			{"Tab", "Toggle focus between list and preview"},
+			{"Ctrl+T", "Switch to Browser mode"},
+			{"Ctrl+E", "Open source file in editor"},
+			{"Ctrl+P", "Open command palette"},
+			{"[/]", "Resize panels"},
+			{"{/}", "Collapse/expand panels"},
+			{"?", "Show this help"},
+			{"Ctrl+D", "Quit"},
+		}
+	case BrowserMode:
+		return "BROWSER", [][2]string{
+			{"↑/↓", "Navigate items"},
+			{"Enter", "Open directory or start wizard"},
+			{"Esc", "Go up one directory"},
+			{"Tab", "Toggle focus between tree and preview"},
+			{"Ctrl+T", "Switch to Tags mode"},
+			{"Ctrl+E", "Open source file in editor"},
+			{"Ctrl+P", "Open command palette"},
+			{"[/]", "Resize panels"},
+			{"{/}", "Collapse/expand panels"},
+			{"?", "Show this help"},
+			{"Ctrl+D", "Quit"},
+		}
+	case TagsMode:
+		if m.inTagSnippets {
+			return "TAGS > STRANDS", [][2]string{
+				{"↑/↓", "Navigate strands"},
+				{"Enter", "Start wizard for selected strand"},
+				{"Esc", "Back to tags list"},
+				{"Tab", "Toggle focus between list and preview"},
+				{"Ctrl+T", "Switch to Finder mode"},
+				{"Ctrl+E", "Open source file in editor"},
+				{"Ctrl+P", "Open command palette"},
+				{"[/]", "Resize panels"},
+				{"{/}", "Collapse/expand panels"},
+				{"?", "Show this help"},
+				{"Ctrl+D", "Quit"},
+			}
+		}
+		return "TAGS", [][2]string{
+			{"↑/↓", "Navigate tags"},
+			{"Enter", "Show strands for selected tag"},
+			{"Tab", "Toggle focus between tags and preview"},
+			{"Ctrl+T", "Switch to Finder mode"},
+			{"Ctrl+E", "Open source file in editor"},
+			{"Ctrl+P", "Open command palette"},
+			{"[/]", "Resize panels"},
+			{"{/}", "Collapse/expand panels"},
+			{"?", "Show this help"},
+			{"Ctrl+D", "Quit"},
+		}
+	case WizardMode:
+		return "WIZARD", [][2]string{
+			{"Enter", "Confirm value and continue"},
+			{"Tab", "Confirm and next / select suggestion"},
+			{"Shift+Tab", "Previous variable"},
+			{"↑/↓", "Navigate suggestions"},
+			{"Esc", "Cancel wizard"},
+			{"?", "Show this help"},
+			{"Ctrl+D", "Quit"},
+		}
+	case CommandPaletteMode:
+		return "COMMAND PALETTE", [][2]string{
+			{"↑/↓", "Navigate commands"},
+			{"Enter", "Execute selected command"},
+			{"Esc", "Close palette"},
+			{"?", "Show this help"},
+			{"Ctrl+D", "Quit"},
+		}
+	default:
+		return "UNKNOWN", [][2]string{}
+	}
+}
+
 func (m *AppModel) selectSnippet(snip domain.Snippet) tea.Cmd {
 	if len(snip.Placeholders) == 0 {
 		return m.finalizeSnippet(snip.Body)
@@ -797,6 +877,19 @@ echo <$message>
 			m.showFloatingPane("Floating Pane", []string{
 				"Press Esc, Enter, or Q to dismiss.",
 			}, 50, 12)
+			return m, nil
+		case "?":
+			modeName, bindings := m.getModeKeybindings()
+			lines := []string{
+				fmt.Sprintf("Keyboard Shortcuts - %s", modeName),
+				"",
+			}
+			for _, b := range bindings {
+				lines = append(lines, fmt.Sprintf("  %-15s %s", b[0], b[1]))
+			}
+			lines = append(lines, "")
+			lines = append(lines, "Press Esc, Enter, or ? to dismiss")
+			m.showFloatingPane("Help", lines, 60, len(lines)+4)
 			return m, nil
 		case "[", "{":
 			if msg.String() == "{" {

@@ -33,7 +33,7 @@
 - [ ] Preview pane: syntax highlighting for more languages (auto-detect from code block)
 
 ### Navigation & Workflow
-- [ ] Keyboard shortcuts cheat sheet: `?` or `Ctrl+/` opens overlay
+- [x] Keyboard shortcuts cheat sheet: `?` or `Ctrl+/` opens overlay
 - [ ] Jump to strand by ID: `:123` or `g123` in Finder
 - [ ] Bookmark/favorite strands with `Ctrl+F`
 - [ ] Open strand in external viewer (not editor) with `Ctrl+V` - read-only mode
@@ -77,7 +77,7 @@
 ## Quick Wins (Start Here)
 
 1. [x] Smart defaults from history - pre-fill wizard variables with last-used values
-2. [ ] Keyboard shortcuts overlay - 2 hours, high visibility
+2. [x] Keyboard shortcuts overlay - 2 hours, high visibility
 3. [x] Recent strands tracking - surface frequently used strands at top of Finder
 4. [ ] Multi-line variable input - 3 hours, solves real pain point
 5. [ ] Search filter operators - 6 hours, power-user feature
