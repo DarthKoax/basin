@@ -19,6 +19,7 @@ var (
 	flagNoClipboard bool
 	flagNoAutoCopy  bool
 	flagVersion     bool
+	Version         = "0.2.0"
 )
 
 var rootCmd = &cobra.Command{
