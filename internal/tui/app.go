@@ -145,6 +145,14 @@ type AppModel struct {
 	filenamePromptActive bool
 	filenamePromptInput  textinput.Model
 	filenamePromptRoot   string
+
+	// Fullscreen preview mode state
+	fullscreenActive bool
+
+	// Full file preview state
+	fullFilePreviewActive  bool
+	fullFilePreviewScroll  int
+	fullFilePreviewContent string
 }
 
 func (m *AppModel) showFloatingPane(title string, content []string, width, height int) {
@@ -421,6 +429,8 @@ func (m *AppModel) getModeKeybindings() (string, [][2]string) {
 			{"Ctrl+T", "Switch to Browser mode"},
 			{"Ctrl+E", "Open source file in editor"},
 			{"Ctrl+P", "Open command palette"},
+			{"f", "Toggle fullscreen preview"},
+			{"F", "View full source file"},
 			{"[/]", "Resize panels"},
 			{"{/}", "Collapse/expand panels"},
 			{"?", "Show this help"},
@@ -435,6 +445,8 @@ func (m *AppModel) getModeKeybindings() (string, [][2]string) {
 			{"Ctrl+T", "Switch to Tags mode"},
 			{"Ctrl+E", "Open source file in editor"},
 			{"Ctrl+P", "Open command palette"},
+			{"f", "Toggle fullscreen preview"},
+			{"F", "View full source file"},
 			{"[/]", "Resize panels"},
 			{"{/}", "Collapse/expand panels"},
 			{"?", "Show this help"},
@@ -450,6 +462,8 @@ func (m *AppModel) getModeKeybindings() (string, [][2]string) {
 				{"Ctrl+T", "Switch to Finder mode"},
 				{"Ctrl+E", "Open source file in editor"},
 				{"Ctrl+P", "Open command palette"},
+				{"f", "Toggle fullscreen preview"},
+				{"F", "View full source file"},
 				{"[/]", "Resize panels"},
 				{"{/}", "Collapse/expand panels"},
 				{"?", "Show this help"},
@@ -463,6 +477,8 @@ func (m *AppModel) getModeKeybindings() (string, [][2]string) {
 			{"Ctrl+T", "Switch to Finder mode"},
 			{"Ctrl+E", "Open source file in editor"},
 			{"Ctrl+P", "Open command palette"},
+			{"f", "Toggle fullscreen preview"},
+			{"F", "View full source file"},
 			{"[/]", "Resize panels"},
 			{"{/}", "Collapse/expand panels"},
 			{"?", "Show this help"},
@@ -847,9 +863,47 @@ echo <$message>
 				return m, cmd
 			}
 		}
+		// Fullscreen / full-file preview key handling (before mode-specific dispatch)
+		keyStr := msg.String()
+		if keyStr == "f" {
+			if m.mode != WizardMode && m.mode != CommandPaletteMode {
+				m.fullscreenActive = !m.fullscreenActive
+				return m, nil
+			}
+		}
+		if keyStr == "F" {
+			if m.mode != WizardMode && m.mode != CommandPaletteMode {
+				if !m.fullFilePreviewActive {
+					m.fullFilePreviewActive = true
+					m.fullFilePreviewScroll = 0
+					m.loadFullFileContent()
+				} else {
+					m.fullFilePreviewActive = false
+					m.fullscreenActive = false
+				}
+				return m, nil
+			}
+		}
+		if keyStr == "esc" || keyStr == "q" {
+			if m.fullFilePreviewActive && m.fullscreenActive {
+				m.fullscreenActive = false
+				m.fullFilePreviewActive = false
+				return m, nil
+			}
+			if m.fullscreenActive {
+				m.fullscreenActive = false
+				return m, nil
+			}
+			if m.fullFilePreviewActive {
+				m.fullFilePreviewActive = false
+				return m, nil
+			}
+		}
 		switch msg.String() {
 		case "ctrl+d":
-			return m, tea.Quit
+			if !(m.fullscreenActive || m.fullFilePreviewActive) {
+				return m, tea.Quit
+			}
 		case "ctrl+t":
 			if m.mode != WizardMode && m.mode != CommandPaletteMode {
 				m.mode = (m.mode + 1) % 3
@@ -909,6 +963,42 @@ echo <$message>
 			}
 			return m, nil
 		}
+		// Scroll handling in fullscreen / full-file preview modes
+		if m.fullscreenActive || m.fullFilePreviewActive {
+			switch msg.String() {
+			case "up", "k":
+				if m.fullFilePreviewActive {
+					m.fullFilePreviewScroll--
+					if m.fullFilePreviewScroll < 0 {
+						m.fullFilePreviewScroll = 0
+					}
+				} else {
+					m.decrementFullscreenScroll()
+				}
+			case "down", "j":
+				if m.fullFilePreviewActive {
+					m.fullFilePreviewScroll++
+				} else {
+					m.incrementFullscreenScroll()
+				}
+			case "ctrl+u":
+				if m.fullFilePreviewActive {
+					m.fullFilePreviewScroll -= m.termHeight / 2
+					if m.fullFilePreviewScroll < 0 {
+						m.fullFilePreviewScroll = 0
+					}
+				} else {
+					m.pageUpFullscreenScroll()
+				}
+			case "ctrl+d":
+				if m.fullFilePreviewActive {
+					m.fullFilePreviewScroll += m.termHeight / 2
+				} else {
+					m.pageDownFullscreenScroll()
+				}
+			}
+			return m, nil
+		}
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
 	case tea.WindowSizeMsg:
@@ -945,6 +1035,25 @@ echo <$message>
 }
 
 func (m *AppModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.fullscreenActive || m.fullFilePreviewActive {
+		if msg.Button == tea.MouseButtonWheelUp {
+			if m.fullFilePreviewActive {
+				m.fullFilePreviewScroll--
+				if m.fullFilePreviewScroll < 0 {
+					m.fullFilePreviewScroll = 0
+				}
+			} else {
+				m.decrementFullscreenScroll()
+			}
+		} else if msg.Button == tea.MouseButtonWheelDown {
+			if m.fullFilePreviewActive {
+				m.fullFilePreviewScroll++
+			} else {
+				m.incrementFullscreenScroll()
+			}
+		}
+		return m, nil
+	}
 	row := msg.Y
 	col := msg.X
 	leftWidth, _, panelHeight := m.panelDims()
@@ -1713,6 +1822,13 @@ func (m *AppModel) View() string {
 		return fmt.Sprintf("Strand copied to clipboard!\n\n%s\n", m.FinalSnippet)
 	}
 
+	if m.fullFilePreviewActive {
+		return m.renderFullFilePreview()
+	}
+	if m.fullscreenActive {
+		return m.renderFullscreenPreview()
+	}
+
 	var sb strings.Builder
 
 	header := m.renderHeader()
@@ -1824,28 +1940,28 @@ func (m *AppModel) renderFooter() string {
 	switch m.mode {
 	case FinderMode:
 		if m.finderFocusedPanel == 0 {
-			instructions = "Enter: wizard  Tab: focus preview  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+			instructions = "Enter: wizard  Tab: focus preview  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
 		} else {
-			instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+			instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  f: fullscreen  F: full file  ↑↓: scroll"
 		}
 	case BrowserMode:
 		if m.browserFocusedPanel == 0 {
-			instructions = "Enter: open/wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+			instructions = "Enter: open/wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
 		} else {
-			instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+			instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  f: fullscreen  F: full file  ↑↓: scroll"
 		}
 	case TagsMode:
 		if m.inTagSnippets {
 			if m.tagSnippetsFocusedPanel == 0 {
-				instructions = "Enter: wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+				instructions = "Enter: wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
 			} else {
-				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  f: fullscreen  F: full file  ↑↓: scroll"
 			}
 		} else {
 			if m.tagsFocusedPanel == 0 {
-				instructions = "Enter: open  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+				instructions = "Enter: open  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
 			} else {
-				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  f: fullscreen  F: full file  ↑↓: scroll"
 			}
 		}
 	case WizardMode:
@@ -1856,28 +1972,28 @@ func (m *AppModel) renderFooter() string {
 		switch prevMode {
 		case FinderMode:
 			if m.finderFocusedPanel == 0 {
-				instructions = "Enter: wizard  Tab: focus preview  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+				instructions = "Enter: wizard  Tab: focus preview  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
 			} else {
-				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  f: fullscreen  F: full file  ↑↓: scroll"
 			}
 		case BrowserMode:
 			if m.browserFocusedPanel == 0 {
-				instructions = "Enter: open/wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+				instructions = "Enter: open/wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
 			} else {
-				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  f: fullscreen  F: full file  ↑↓: scroll"
 			}
 		case TagsMode:
 			if m.inTagSnippets {
 				if m.tagSnippetsFocusedPanel == 0 {
-					instructions = "Enter: wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+					instructions = "Enter: wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
 				} else {
-					instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+					instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  f: fullscreen  F: full file  ↑↓: scroll"
 				}
 			} else {
 				if m.tagsFocusedPanel == 0 {
-					instructions = "Enter: open  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+					instructions = "Enter: open  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
 				} else {
-					instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit  ↑↓: scroll"
+					instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  f: fullscreen  F: full file  ↑↓: scroll"
 				}
 			}
 		}
@@ -2042,6 +2158,357 @@ func (m *AppModel) renderFilenamePromptOverlay() string {
 		Padding(1, 1)
 
 	return overlayStyle.Render(body.String())
+}
+
+// getCurrentSnippetFile returns the SnippetFile backing the current selection, if any.
+func (m *AppModel) getCurrentSnippetFile() *domain.SnippetFile {
+	path := m.getSourceFileForCurrentSelection()
+	if path != "" {
+		for i := range m.snippetFiles {
+			if m.snippetFiles[i].Path == path {
+				return &m.snippetFiles[i]
+			}
+		}
+	}
+
+	// Fallback: locate the file by the currently selected snippet.
+	var snip *domain.Snippet
+	switch m.mode {
+	case FinderMode:
+		filtered := m.filteredSnippets()
+		if len(filtered) > 0 && m.finderSelectedIndex < len(filtered) {
+			s := filtered[m.finderSelectedIndex]
+			snip = &s
+		}
+	case BrowserMode:
+		if len(m.browserItems) > 0 && m.browserSelectedIndex < len(m.browserItems) {
+			item := m.browserItems[m.browserSelectedIndex]
+			if item.isSnip {
+				s := item.snip
+				snip = &s
+			} else if item.isFile {
+				for i := range m.snippetFiles {
+					if m.snippetFiles[i].RelativePath == item.path || m.snippetFiles[i].Path == item.path {
+						return &m.snippetFiles[i]
+					}
+				}
+			}
+		}
+	case TagsMode:
+		if m.inTagSnippets && len(m.tagSnippets) > 0 && m.tagSnippetsSelectedIndex < len(m.tagSnippets) {
+			s := m.tagSnippets[m.tagSnippetsSelectedIndex]
+			snip = &s
+		}
+	}
+
+	if snip != nil {
+		for i := range m.snippetFiles {
+			for _, s := range m.snippetFiles[i].Snippets {
+				if s.Name == snip.Name && (snip.RelativePath == "" || s.RelativePath == snip.RelativePath) {
+					return &m.snippetFiles[i]
+				}
+			}
+			if snip.RelativePath != "" && m.snippetFiles[i].RelativePath == snip.RelativePath {
+				return &m.snippetFiles[i]
+			}
+		}
+	}
+
+	return nil
+}
+
+// loadFullFileContent loads and caches the rendered full-file preview content.
+func (m *AppModel) loadFullFileContent() {
+	m.fullFilePreviewContent = ""
+	file := m.getCurrentSnippetFile()
+	if file == nil {
+		m.fullFilePreviewContent = "Error: Could not load file content"
+		return
+	}
+	md := m.renderFullFileMarkdown(*file)
+	rendered, err := mdRenderer.Render(md)
+	if err != nil {
+		m.fullFilePreviewContent = "Error: Could not load file content"
+		return
+	}
+	m.fullFilePreviewContent = rendered
+}
+
+// renderFullFileMarkdown reconstructs the full markdown file content from a SnippetFile.
+func (m *AppModel) renderFullFileMarkdown(file domain.SnippetFile) string {
+	var sb strings.Builder
+
+	if file.Frontmatter.Name != "" || len(file.Frontmatter.Tags) > 0 || file.Frontmatter.Description != "" {
+		sb.WriteString("---\n")
+		if file.Frontmatter.Name != "" {
+			sb.WriteString(fmt.Sprintf("name: %s\n", file.Frontmatter.Name))
+		}
+		if len(file.Frontmatter.Tags) > 0 {
+			sb.WriteString(fmt.Sprintf("tags: [%s]\n", strings.Join(file.Frontmatter.Tags, ", ")))
+		}
+		if file.Frontmatter.Description != "" {
+			sb.WriteString(fmt.Sprintf("description: %s\n", file.Frontmatter.Description))
+		}
+		sb.WriteString("---\n\n")
+	}
+
+	for i, snip := range file.Snippets {
+		if i > 0 {
+			sb.WriteString("\n---\n\n")
+		}
+		sb.WriteString(fmt.Sprintf("## %s\n\n", snip.Name))
+		if snip.Description != "" {
+			sb.WriteString(snip.Description + "\n\n")
+		}
+		sb.WriteString("```" + snip.Language + "\n")
+		sb.WriteString(snip.Body)
+		if !strings.HasSuffix(snip.Body, "\n") {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("```\n")
+	}
+
+	return sb.String()
+}
+
+// fullscreen scroll helpers
+func (m *AppModel) fullscreenScrollValue() int {
+	switch m.mode {
+	case FinderMode:
+		return m.finderPreviewScroll
+	case BrowserMode:
+		return m.browserPreviewScroll
+	case TagsMode:
+		if m.inTagSnippets {
+			return m.tagSnippetsPreviewScroll
+		}
+		return m.tagsPreviewScroll
+	}
+	return 0
+}
+
+func (m *AppModel) setFullscreenScroll(v int) {
+	switch m.mode {
+	case FinderMode:
+		m.finderPreviewScroll = v
+	case BrowserMode:
+		m.browserPreviewScroll = v
+	case TagsMode:
+		if m.inTagSnippets {
+			m.tagSnippetsPreviewScroll = v
+		} else {
+			m.tagsPreviewScroll = v
+		}
+	}
+}
+
+func (m *AppModel) decrementFullscreenScroll() {
+	switch m.mode {
+	case FinderMode:
+		m.finderPreviewScroll--
+		if m.finderPreviewScroll < 0 {
+			m.finderPreviewScroll = 0
+		}
+	case BrowserMode:
+		m.browserPreviewScroll--
+		if m.browserPreviewScroll < 0 {
+			m.browserPreviewScroll = 0
+		}
+	case TagsMode:
+		if m.inTagSnippets {
+			m.tagSnippetsPreviewScroll--
+			if m.tagSnippetsPreviewScroll < 0 {
+				m.tagSnippetsPreviewScroll = 0
+			}
+		} else {
+			m.tagsPreviewScroll--
+			if m.tagsPreviewScroll < 0 {
+				m.tagsPreviewScroll = 0
+			}
+		}
+	}
+}
+
+func (m *AppModel) incrementFullscreenScroll() {
+	switch m.mode {
+	case FinderMode:
+		m.finderPreviewScroll++
+	case BrowserMode:
+		m.browserPreviewScroll++
+	case TagsMode:
+		if m.inTagSnippets {
+			m.tagSnippetsPreviewScroll++
+		} else {
+			m.tagsPreviewScroll++
+		}
+	}
+}
+
+func (m *AppModel) pageUpFullscreenScroll() {
+	switch m.mode {
+	case FinderMode:
+		m.finderPreviewScroll -= m.termHeight / 2
+		if m.finderPreviewScroll < 0 {
+			m.finderPreviewScroll = 0
+		}
+	case BrowserMode:
+		m.browserPreviewScroll -= m.termHeight / 2
+		if m.browserPreviewScroll < 0 {
+			m.browserPreviewScroll = 0
+		}
+	case TagsMode:
+		if m.inTagSnippets {
+			m.tagSnippetsPreviewScroll -= m.termHeight / 2
+			if m.tagSnippetsPreviewScroll < 0 {
+				m.tagSnippetsPreviewScroll = 0
+			}
+		} else {
+			m.tagsPreviewScroll -= m.termHeight / 2
+			if m.tagsPreviewScroll < 0 {
+				m.tagsPreviewScroll = 0
+			}
+		}
+	}
+}
+
+func (m *AppModel) pageDownFullscreenScroll() {
+	switch m.mode {
+	case FinderMode:
+		m.finderPreviewScroll += m.termHeight / 2
+	case BrowserMode:
+		m.browserPreviewScroll += m.termHeight / 2
+	case TagsMode:
+		if m.inTagSnippets {
+			m.tagSnippetsPreviewScroll += m.termHeight / 2
+		} else {
+			m.tagsPreviewScroll += m.termHeight / 2
+		}
+	}
+}
+
+func (m *AppModel) renderFullscreenPreview() string {
+	rendered := ""
+	switch m.mode {
+	case FinderMode:
+		filtered := m.filteredSnippets()
+		if len(filtered) > 0 && m.finderSelectedIndex < len(filtered) {
+			rendered = m.renderSnippetPreview(filtered[m.finderSelectedIndex])
+		}
+	case BrowserMode:
+		if len(m.browserItems) > 0 && m.browserSelectedIndex < len(m.browserItems) {
+			item := m.browserItems[m.browserSelectedIndex]
+			if item.isSnip {
+				rendered = m.renderSnippetPreview(item.snip)
+			}
+		}
+	case TagsMode:
+		if m.inTagSnippets && len(m.tagSnippets) > 0 && m.tagSnippetsSelectedIndex < len(m.tagSnippets) {
+			rendered = m.renderSnippetPreview(m.tagSnippets[m.tagSnippetsSelectedIndex])
+		}
+	}
+	if strings.TrimSpace(rendered) == "" {
+		rendered = "No strand selected."
+	}
+
+	previewLines := strings.Split(rendered, "\n")
+	visibleH := m.termHeight - 1
+	if visibleH < 1 {
+		visibleH = 1
+	}
+	maxScroll := len(previewLines) - visibleH
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	scroll := m.fullscreenScrollValue()
+	if scroll > maxScroll {
+		scroll = maxScroll
+	}
+	if scroll < 0 {
+		scroll = 0
+	}
+	m.setFullscreenScroll(scroll)
+
+	visibleLines := clipLines(previewLines, scroll, visibleH)
+	content := strings.Join(visibleLines, "\n")
+	if content == "" {
+		content = "No strand selected."
+	}
+
+	scrollbar := renderScrollbar(len(previewLines), scroll, visibleH, visibleH+4)
+	if scrollbar != "" {
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(visibleH)
+		content = lipgloss.JoinHorizontal(lipgloss.Top, content, scrollbarStyle.Render(scrollbar))
+	}
+
+	footer := instructionsStyle.Render("f/Esc/q: exit fullscreen  ↑↓/jk: scroll  Ctrl+U/D: page scroll")
+	return content + "\n" + footer + "\n"
+}
+
+func (m *AppModel) renderFullFilePreview() string {
+	if m.fullFilePreviewContent == "" {
+		m.loadFullFileContent()
+	}
+
+	file := m.getCurrentSnippetFile()
+	headerPath := ""
+	if file != nil {
+		headerPath = file.RelativePath
+	} else {
+		headerPath = "unknown"
+	}
+
+	content := m.fullFilePreviewContent
+	if strings.TrimSpace(content) == "" {
+		content = "Error: Could not load file content"
+	}
+
+	lines := strings.Split(content, "\n")
+	var visibleH int
+	var footer string
+	if m.fullscreenActive {
+		visibleH = m.termHeight - 1
+		if visibleH < 1 {
+			visibleH = 1
+		}
+		footer = instructionsStyle.Render("f/Esc/q: exit fullscreen  ↑↓/jk: scroll  Ctrl+U/D: page scroll")
+	} else {
+		visibleH = m.termHeight - 2
+		if visibleH < 1 {
+			visibleH = 1
+		}
+		footer = instructionsStyle.Render("F/Esc/q: exit  ↑↓/jk: scroll  Ctrl+U/D: page scroll")
+	}
+
+	maxScroll := len(lines) - visibleH
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	scroll := m.fullFilePreviewScroll
+	if scroll > maxScroll {
+		scroll = maxScroll
+	}
+	if scroll < 0 {
+		scroll = 0
+	}
+	m.fullFilePreviewScroll = scroll
+
+	visibleLines := clipLines(lines, scroll, visibleH)
+	body := strings.Join(visibleLines, "\n")
+	if body == "" {
+		body = content
+	}
+
+	scrollbar := renderScrollbar(len(lines), scroll, visibleH, visibleH+4)
+	if scrollbar != "" {
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(visibleH)
+		body = lipgloss.JoinHorizontal(lipgloss.Top, body, scrollbarStyle.Render(scrollbar))
+	}
+
+	if m.fullscreenActive {
+		return body + "\n" + footer + "\n"
+	}
+	header := titleStyle.Render("Full File: " + headerPath)
+	return header + "\n" + body + "\n" + footer + "\n"
 }
 
 func (m *AppModel) renderSnippetPreview(snip domain.Snippet) string {
