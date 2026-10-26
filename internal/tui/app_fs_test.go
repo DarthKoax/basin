@@ -14,6 +14,7 @@ func TestFS_ToggleFullscreen(t *testing.T) {
 	cfg := config.DefaultConfig()
 	snip := newTestSnippet()
 	m := NewAppModel(cfg, nil, []domain.Snippet{snip}, nil)
+	m.finderFocusedPanel = 1
 	m.termWidth = 120
 	m.termHeight = 40
 
@@ -57,6 +58,7 @@ func TestFS_FullFilePreviewToggle(t *testing.T) {
 	snip := domain.Snippet{Name: "s", RelativePath: "test.md", Body: "echo hi", Language: "sh", SourceFile: "test.md"}
 	files := []domain.SnippetFile{{Path: "test.md", RelativePath: "test.md", Snippets: []domain.Snippet{snip}}}
 	m := NewAppModel(cfg, nil, []domain.Snippet{snip}, files)
+	m.finderFocusedPanel = 1
 	m.termWidth = 120
 	m.termHeight = 40
 
@@ -83,6 +85,7 @@ func TestFS_FullFilePreviewError(t *testing.T) {
 	cfg := config.DefaultConfig()
 	snip := domain.Snippet{Name: "s", RelativePath: "test.md", Body: "echo hi", Language: "sh"}
 	m := NewAppModel(cfg, nil, []domain.Snippet{snip}, nil)
+	m.finderFocusedPanel = 1
 	m.termWidth = 120
 	m.termHeight = 40
 
@@ -118,6 +121,7 @@ func TestFS_FullFileAllStrands(t *testing.T) {
 	m.allSnippets[0].SourceFile = "test.md"
 	m.allSnippets[1].SourceFile = "test.md"
 	m.snippetFiles = files
+	m.finderFocusedPanel = 1
 	m.termWidth = 120
 	m.termHeight = 40
 
@@ -228,5 +232,24 @@ func TestFS_FullscreenToggleInFullFile(t *testing.T) {
 	}
 	if !m.fullFilePreviewActive {
 		t.Fatal("expected still full file preview")
+	}
+}
+
+func TestFS_SearchInputReceivesF(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snip := newTestSnippet()
+	m := NewAppModel(cfg, nil, []domain.Snippet{snip}, nil)
+	m.termWidth = 120
+	m.termHeight = 40
+	// search input focused by default (finderFocusedPanel == 0)
+
+	key := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}}
+	model, _ := m.Update(key)
+	m = model.(*AppModel)
+	if m.fullscreenActive {
+		t.Fatal("expected fullscreen inactive when typing in search")
+	}
+	if !strings.Contains(m.finderQuery.Value(), "f") {
+		t.Fatalf("expected search query to contain 'f', got %q", m.finderQuery.Value())
 	}
 }

@@ -865,14 +865,18 @@ echo <$message>
 		}
 		// Fullscreen / full-file preview key handling (before mode-specific dispatch)
 		keyStr := msg.String()
+		// Guard: do not intercept f/F when the Finder search input is focused,
+		// so users can type those letters in the search box. The overlay states
+		// (fullscreen/full-file preview) always intercept regardless of focus.
+		searchInputFocused := m.mode == FinderMode && m.finderFocusedPanel == 0 && !m.fullscreenActive && !m.fullFilePreviewActive
 		if keyStr == "f" {
-			if m.mode != WizardMode && m.mode != CommandPaletteMode {
+			if m.mode != WizardMode && m.mode != CommandPaletteMode && !searchInputFocused {
 				m.fullscreenActive = !m.fullscreenActive
 				return m, nil
 			}
 		}
 		if keyStr == "F" {
-			if m.mode != WizardMode && m.mode != CommandPaletteMode {
+			if m.mode != WizardMode && m.mode != CommandPaletteMode && !searchInputFocused {
 				if !m.fullFilePreviewActive {
 					m.fullFilePreviewActive = true
 					m.fullFilePreviewScroll = 0
@@ -1940,28 +1944,28 @@ func (m *AppModel) renderFooter() string {
 	switch m.mode {
 	case FinderMode:
 		if m.finderFocusedPanel == 0 {
-			instructions = "Enter: wizard  Tab: focus preview  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
+			instructions = "Enter: wizard  Tab: focus preview  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
 		} else {
-			instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  f: fullscreen  F: full file  ↑↓: scroll"
+			instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  ↑↓: scroll"
 		}
 	case BrowserMode:
 		if m.browserFocusedPanel == 0 {
 			instructions = "Enter: open/wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
 		} else {
-			instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  f: fullscreen  F: full file  ↑↓: scroll"
+			instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  ↑↓: scroll"
 		}
 	case TagsMode:
 		if m.inTagSnippets {
 			if m.tagSnippetsFocusedPanel == 0 {
 				instructions = "Enter: wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
 			} else {
-				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  f: fullscreen  F: full file  ↑↓: scroll"
+				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  ↑↓: scroll"
 			}
 		} else {
 			if m.tagsFocusedPanel == 0 {
 				instructions = "Enter: open  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
 			} else {
-				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  f: fullscreen  F: full file  ↑↓: scroll"
+				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  ↑↓: scroll"
 			}
 		}
 	case WizardMode:
@@ -1972,28 +1976,28 @@ func (m *AppModel) renderFooter() string {
 		switch prevMode {
 		case FinderMode:
 			if m.finderFocusedPanel == 0 {
-				instructions = "Enter: wizard  Tab: focus preview  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
+				instructions = "Enter: wizard  Tab: focus preview  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
 			} else {
-				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  f: fullscreen  F: full file  ↑↓: scroll"
+				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  ↑↓: scroll"
 			}
 		case BrowserMode:
 			if m.browserFocusedPanel == 0 {
 				instructions = "Enter: open/wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
 			} else {
-				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  f: fullscreen  F: full file  ↑↓: scroll"
+				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  ↑↓: scroll"
 			}
 		case TagsMode:
 			if m.inTagSnippets {
 				if m.tagSnippetsFocusedPanel == 0 {
 					instructions = "Enter: wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
 				} else {
-					instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  f: fullscreen  F: full file  ↑↓: scroll"
+					instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  ↑↓: scroll"
 				}
 			} else {
 				if m.tagsFocusedPanel == 0 {
 					instructions = "Enter: open  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
 				} else {
-					instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  f: fullscreen  F: full file  ↑↓: scroll"
+					instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  ↑↓: scroll"
 				}
 			}
 		}
@@ -2429,6 +2433,10 @@ func (m *AppModel) renderFullscreenPreview() string {
 	m.setFullscreenScroll(scroll)
 
 	visibleLines := clipLines(previewLines, scroll, visibleH)
+	// Constrain content width to the terminal to avoid overflow of wide code blocks.
+	for i := range visibleLines {
+		visibleLines[i] = ansi.Truncate(visibleLines[i], m.termWidth-1, "")
+	}
 	content := strings.Join(visibleLines, "\n")
 	if content == "" {
 		content = "No strand selected."
@@ -2470,7 +2478,7 @@ func (m *AppModel) renderFullFilePreview() string {
 		if visibleH < 1 {
 			visibleH = 1
 		}
-		footer = instructionsStyle.Render("f/Esc/q: exit fullscreen  ↑↓/jk: scroll  Ctrl+U/D: page scroll")
+		footer = instructionsStyle.Render("f: exit fullscreen  Esc/q: exit all  ↑↓/jk: scroll  Ctrl+U/D: page scroll")
 	} else {
 		visibleH = m.termHeight - 2
 		if visibleH < 1 {
@@ -2493,6 +2501,10 @@ func (m *AppModel) renderFullFilePreview() string {
 	m.fullFilePreviewScroll = scroll
 
 	visibleLines := clipLines(lines, scroll, visibleH)
+	// Constrain content width to the terminal to avoid overflow of wide code blocks.
+	for i := range visibleLines {
+		visibleLines[i] = ansi.Truncate(visibleLines[i], m.termWidth-1, "")
+	}
 	body := strings.Join(visibleLines, "\n")
 	if body == "" {
 		body = content
