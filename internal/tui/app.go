@@ -2830,9 +2830,9 @@ func (m *AppModel) renderMainPanels() string {
 		}
 	}
 
-	// TEST: Always reduce pane width by 1 to make room for scrollbar
-	leftPaneWidth := leftWidth - 1
-	rightPaneWidth := rightWidth - 1
+	// Always reduce pane width by 2 to make room for scrollbar
+	leftPaneWidth := leftWidth - 2
+	rightPaneWidth := rightWidth - 2
 
 	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(paneH)
 	leftBox := leftPaneStyle.Render(listContent)
@@ -2918,9 +2918,9 @@ func (m *AppModel) renderBrowserPanels() string {
 		rightStyle = focusedBorder
 	}
 
-	// TEST: Always reduce pane width by 1 to make room for scrollbar
-	leftPaneWidth := leftWidth - 1
-	rightPaneWidth := rightWidth - 1
+	// Always reduce pane width by 2 to make room for scrollbar
+	leftPaneWidth := leftWidth - 2
+	rightPaneWidth := rightWidth - 2
 
 	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(paneH)
 	leftBox := leftPaneStyle.Render(listContent)
@@ -3043,9 +3043,9 @@ func (m *AppModel) renderTagsPanels() string {
 		}
 	}
 
-	// TEST: Always reduce pane width by 1 to make room for scrollbar
-	leftPaneWidth := leftWidth - 1
-	rightPaneWidth := rightWidth - 1
+	// Always reduce pane width by 2 to make room for scrollbar
+	leftPaneWidth := leftWidth - 2
+	rightPaneWidth := rightWidth - 2
 
 	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(paneH)
 	leftBox := leftPaneStyle.Render(listContent)
