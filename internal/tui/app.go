@@ -2453,10 +2453,10 @@ func (m *AppModel) fullscreenPaneDims() (paneW, paneH, contentW, contentH int) {
 	if contentH < 1 {
 		contentH = 1
 	}
-	// Reserve 1 column for the scrollbar gutter so the pane's right border
-	// remains visible. paneW is the total rendered width of the bordered pane
-	// (border + padding + content). The scrollbar column is appended externally.
-	paneW = m.termWidth - 2
+	// Reserve 2 columns: 1 for the pane's right border and 1 for the scrollbar gutter.
+	// paneW is the total rendered width of the bordered pane (border + padding + content).
+	// The scrollbar column is appended externally, so we need termWidth - 3 to fit everything.
+	paneW = m.termWidth - 3
 	if paneW < 10 {
 		paneW = 10
 	}
@@ -2620,8 +2620,15 @@ func (m *AppModel) renderFullFilePreview() string {
 
 	visibleLines := clipLines(lines, scroll, visibleH)
 	// Constrain content width to the terminal to avoid overflow of wide code blocks.
+	// Pad each line to terminal width minus 1 (for scrollbar) to position scrollbar at right edge.
+	contentWidth := m.termWidth - 1
 	for i := range visibleLines {
-		visibleLines[i] = ansi.Truncate(visibleLines[i], m.termWidth-1, "")
+		visibleLines[i] = ansi.Truncate(visibleLines[i], contentWidth, "")
+		// Pad line to contentWidth to position scrollbar at right edge
+		lineLen := ansi.StringWidth(visibleLines[i])
+		if lineLen < contentWidth {
+			visibleLines[i] = visibleLines[i] + strings.Repeat(" ", contentWidth-lineLen)
+		}
 	}
 	body := strings.Join(visibleLines, "\n")
 	if body == "" {
