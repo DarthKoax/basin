@@ -39,17 +39,38 @@ func TestPaneHeightWithScrollableContent(t *testing.T) {
 			view := stripANSI(m.View())
 			lines := strings.Split(view, "\n")
 
-			// Count the actual height of each pane by counting lines with │
+			// Count the actual height of each pane by counting lines with │ or border characters
 			leftPaneHeight := 0
 			rightPaneHeight := 0
 
 			for _, line := range lines {
+				// Check for content lines (with │)
 				if strings.Contains(line, "│") {
 					parts := strings.Split(line, "│")
 					if len(parts) >= 3 {
 						leftPaneHeight++
 					}
 					if len(parts) >= 5 {
+						rightPaneHeight++
+					}
+				}
+				// Check for top border lines (with ┌ and ┐)
+				if strings.Contains(line, "┌") && strings.Contains(line, "┐") {
+					parts := strings.Split(line, "┐")
+					if len(parts) >= 2 {
+						leftPaneHeight++
+					}
+					if len(parts) >= 3 {
+						rightPaneHeight++
+					}
+				}
+				// Check for bottom border lines (with └ and ┘)
+				if strings.Contains(line, "└") && strings.Contains(line, "┘") {
+					parts := strings.Split(line, "┘")
+					if len(parts) >= 2 {
+						leftPaneHeight++
+					}
+					if len(parts) >= 3 {
 						rightPaneHeight++
 					}
 				}
