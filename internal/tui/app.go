@@ -2823,14 +2823,9 @@ func (m *AppModel) renderMainPanels() string {
 		}
 	}
 
-	leftPaneWidth := leftWidth
-	if leftScrollbar != "" {
-		leftPaneWidth = leftWidth - 1
-	}
-	rightPaneWidth := rightWidth
-	if previewScrollbar != "" {
-		rightPaneWidth = rightWidth - 1
-	}
+	// TEST: Always reduce pane width by 1 to make room for scrollbar
+	leftPaneWidth := leftWidth - 1
+	rightPaneWidth := rightWidth - 1
 
 	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(paneH)
 	leftBox := leftPaneStyle.Render(listContent)
@@ -2916,14 +2911,9 @@ func (m *AppModel) renderBrowserPanels() string {
 		rightStyle = focusedBorder
 	}
 
-	leftPaneWidth := leftWidth
-	if leftScrollbar != "" {
-		leftPaneWidth = leftWidth - 1
-	}
-	rightPaneWidth := rightWidth
-	if previewScrollbar != "" {
-		rightPaneWidth = rightWidth - 1
-	}
+	// TEST: Always reduce pane width by 1 to make room for scrollbar
+	leftPaneWidth := leftWidth - 1
+	rightPaneWidth := rightWidth - 1
 
 	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(paneH)
 	leftBox := leftPaneStyle.Render(listContent)
@@ -3046,14 +3036,9 @@ func (m *AppModel) renderTagsPanels() string {
 		}
 	}
 
-	leftPaneWidth := leftWidth
-	if listScrollbar != "" {
-		leftPaneWidth = leftWidth - 1
-	}
-	rightPaneWidth := rightWidth
-	if previewScrollbar != "" {
-		rightPaneWidth = rightWidth - 1
-	}
+	// TEST: Always reduce pane width by 1 to make room for scrollbar
+	leftPaneWidth := leftWidth - 1
+	rightPaneWidth := rightWidth - 1
 
 	leftPaneStyle := leftStyle.Width(leftPaneWidth).Height(paneH)
 	leftBox := leftPaneStyle.Render(listContent)
