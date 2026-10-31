@@ -1736,11 +1736,10 @@ func (m *AppModel) innerContentHeight(panelHeight int) int {
 }
 
 func (m *AppModel) paneContentHeight(panelHeight int) int {
-	h := panelHeight - 2
-	if h < 1 {
-		h = 1
+	if panelHeight < 1 {
+		return 1
 	}
-	return h
+	return panelHeight
 }
 
 func clampScroll(selected, offset, visibleHeight int) int {
