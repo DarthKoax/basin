@@ -139,8 +139,8 @@ type AppModel struct {
 	mouseDragging bool
 	mouseDownRow  int
 
-	clipboardErr    error
-	clipboardWarn   string
+	clipboardErr  error
+	clipboardWarn string
 
 	filenamePromptActive bool
 	filenamePromptInput  textinput.Model
@@ -550,7 +550,7 @@ func (m *AppModel) setupWizardForCurrentVar() tea.Cmd {
 	r := resolver.NewResolver(m.config, m.wizardSnippet, fm)
 
 	defVal := r.GetDefaultValue(p)
-	
+
 	if m.history != nil {
 		lastUsed := m.history.GetLastUsedValues(m.wizardSnippet.ID)
 		if lastUsed != nil {
@@ -559,7 +559,7 @@ func (m *AppModel) setupWizardForCurrentVar() tea.Cmd {
 			}
 		}
 	}
-	
+
 	m.wizardInput.SetValue(defVal)
 	m.wizardInput.Placeholder = fmt.Sprintf("Value for %s...", p.Name)
 	m.wizardInput.Width = 30
@@ -594,14 +594,14 @@ func (m *AppModel) setupWizardForCurrentVar() tea.Cmd {
 func (m *AppModel) finalizeSnippet(body string) tea.Cmd {
 	m.Done = true
 	m.FinalSnippet = body
-	
+
 	if m.history != nil {
 		m.history.RecordUsage(m.wizardSnippet.ID, m.wizardConfirmed)
 		if err := m.history.Save(); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to save history: %v\n", err)
 		}
 	}
-	
+
 	if m.config.Output.Clipboard {
 		if err := clipboard.WriteAll(body); err != nil {
 			m.clipboardErr = fmt.Errorf("clipboard copy failed: %w", err)
@@ -1826,11 +1826,29 @@ func (m *AppModel) View() string {
 		return fmt.Sprintf("Strand copied to clipboard!\n\n%s\n", m.FinalSnippet)
 	}
 
+	if m.fullscreenActive {
+		var sb strings.Builder
+		header := m.renderHeader()
+		sb.WriteString(header)
+
+		if m.fullFilePreviewActive {
+			sb.WriteString(m.renderFullFilePreview())
+		} else {
+			sb.WriteString(m.renderFullscreenPreviewPane())
+		}
+
+		footer := m.renderFooter()
+		sb.WriteString(footer)
+		baseView := sb.String()
+
+		if m.floatingPane.active {
+			return m.renderWithFloatingPane(baseView)
+		}
+		return baseView
+	}
+
 	if m.fullFilePreviewActive {
 		return m.renderFullFilePreview()
-	}
-	if m.fullscreenActive {
-		return m.renderFullscreenPreview()
 	}
 
 	var sb strings.Builder
@@ -1941,39 +1959,16 @@ func (m *AppModel) renderHeader() string {
 func (m *AppModel) renderFooter() string {
 	var instructions string
 
-	switch m.mode {
-	case FinderMode:
-		if m.finderFocusedPanel == 0 {
-			instructions = "Enter: wizard  Tab: focus preview  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+	// Fullscreen mode overrides normal mode-specific instructions.
+	if m.fullscreenActive {
+		if m.fullFilePreviewActive {
+			instructions = "f: exit fullscreen  Esc/q: exit all  ↑↓/jk: scroll  Ctrl+U/D: page scroll"
 		} else {
-			instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  ↑↓: scroll"
+			instructions = "f/Esc/q: exit fullscreen  ↑↓/jk: scroll  Ctrl+U/D: page scroll"
 		}
-	case BrowserMode:
-		if m.browserFocusedPanel == 0 {
-			instructions = "Enter: open/wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
-		} else {
-			instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  ↑↓: scroll"
-		}
-	case TagsMode:
-		if m.inTagSnippets {
-			if m.tagSnippetsFocusedPanel == 0 {
-				instructions = "Enter: wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
-			} else {
-				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  ↑↓: scroll"
-			}
-		} else {
-			if m.tagsFocusedPanel == 0 {
-				instructions = "Enter: open  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
-			} else {
-				instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  ↑↓: scroll"
-			}
-		}
-	case WizardMode:
-		instructions = "Ctrl+F: float  Ctrl+D: quit"
-	case CommandPaletteMode:
-		// Show previous mode's footer underneath the overlay
-		prevMode := m.commandPalettePrevMode
-		switch prevMode {
+	} else {
+
+		switch m.mode {
 		case FinderMode:
 			if m.finderFocusedPanel == 0 {
 				instructions = "Enter: wizard  Tab: focus preview  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
@@ -2000,8 +1995,42 @@ func (m *AppModel) renderFooter() string {
 					instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  ↑↓: scroll"
 				}
 			}
+		case WizardMode:
+			instructions = "Ctrl+F: float  Ctrl+D: quit"
+		case CommandPaletteMode:
+			// Show previous mode's footer underneath the overlay
+			prevMode := m.commandPalettePrevMode
+			switch prevMode {
+			case FinderMode:
+				if m.finderFocusedPanel == 0 {
+					instructions = "Enter: wizard  Tab: focus preview  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  Ctrl+D: quit"
+				} else {
+					instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  ↑↓: scroll"
+				}
+			case BrowserMode:
+				if m.browserFocusedPanel == 0 {
+					instructions = "Enter: open/wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
+				} else {
+					instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  ↑↓: scroll"
+				}
+			case TagsMode:
+				if m.inTagSnippets {
+					if m.tagSnippetsFocusedPanel == 0 {
+						instructions = "Enter: wizard  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
+					} else {
+						instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  ↑↓: scroll"
+					}
+				} else {
+					if m.tagsFocusedPanel == 0 {
+						instructions = "Enter: open  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit"
+					} else {
+						instructions = "Tab/Esc/Left: back to list  Ctrl+E: edit  Ctrl+F: float  Ctrl+P: commands  Ctrl+T: mode  f: fullscreen  F: full file  Ctrl+D: quit  ↑↓: scroll"
+					}
+				}
+			}
 		}
-	}
+
+	} // end else (non-fullscreen)
 
 	footerLine := instructionsStyle.Render(instructions)
 
@@ -2390,7 +2419,112 @@ func (m *AppModel) pageDownFullscreenScroll() {
 	}
 }
 
-func (m *AppModel) renderFullscreenPreview() string {
+// fullscreenPaneDims computes the pane and content dimensions for a full-width
+// fullscreen bordered pane that fills the space between the header and footer.
+func (m *AppModel) fullscreenPaneDims() (paneW, paneH, contentW, contentH int) {
+	headerH := m.headerHeight()
+	const footerRows = 1
+	availH := m.termHeight - headerH - footerRows
+	if availH < 5 {
+		availH = 5
+	}
+	paneH = availH
+	// Bordered pane overhead: 2 rows/cols for border + 2 rows/cols for padding.
+	contentH = paneH - 4
+	if contentH < 1 {
+		contentH = 1
+	}
+	// Reserve 1 column for the scrollbar gutter so the pane's right border
+	// remains visible. paneW is the total rendered width of the bordered pane
+	// (border + padding + content). The scrollbar column is appended externally.
+	paneW = m.termWidth - 2
+	if paneW < 10 {
+		paneW = 10
+	}
+	contentW = paneW - 4
+	if contentW < 1 {
+		contentW = 1
+	}
+	return
+}
+
+// renderFullscreenBorderedPane wraps the given content lines in a full-width
+// bordered pane with a scrollbar on the right edge. The scroll parameter is
+// both read and written back via the provided getter/setter.
+func (m *AppModel) renderFullscreenBorderedPane(rawLines []string, getScroll func() int, setScroll func(int)) string {
+	paneW, paneH, contentW, contentH := m.fullscreenPaneDims()
+
+	totalLines := len(rawLines)
+	maxScroll := totalLines - contentH
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	scroll := getScroll()
+	if scroll > maxScroll {
+		scroll = maxScroll
+	}
+	if scroll < 0 {
+		scroll = 0
+	}
+	setScroll(scroll)
+
+	visibleLines := clipLines(rawLines, scroll, contentH)
+	for i := range visibleLines {
+		visibleLines[i] = ansi.Truncate(visibleLines[i], contentW, "")
+	}
+	body := strings.Join(visibleLines, "\n")
+	if body == "" {
+		body = " "
+	}
+
+	paneStyle := focusedBorder.Width(paneW).Height(paneH)
+	pane := paneStyle.Render(body)
+
+	// Build scrollbar aligned with the pane's content area.
+	// The pane structure is: 1 top border + 1 top padding + content + 1 bottom padding + 1 bottom border
+	// So content area starts at row 2 and ends at row paneH-3.
+	if totalLines > contentH {
+		thumbSize := (contentH * contentH) / totalLines
+		if thumbSize < 1 {
+			thumbSize = 1
+		}
+		thumbPos := 0
+		if maxScroll > 0 {
+			thumbPos = (scroll * (contentH - thumbSize)) / maxScroll
+			if thumbPos < 0 {
+				thumbPos = 0
+			}
+			if thumbPos+thumbSize > contentH {
+				thumbPos = contentH - thumbSize
+			}
+		}
+
+		// Build aligned scrollbar: 2 blank rows (for top border+padding), then contentH rows of scrollbar, then 2 blank rows (for bottom padding+border)
+		var sb strings.Builder
+		for i := 0; i < paneH; i++ {
+			contentRow := i - 2 // offset by 2 for top border+padding
+			if contentRow >= 0 && contentRow < contentH {
+				if contentRow >= thumbPos && contentRow < thumbPos+thumbSize {
+					sb.WriteString("█")
+				} else {
+					sb.WriteString("░")
+				}
+			} else {
+				sb.WriteString(" ")
+			}
+			if i < paneH-1 {
+				sb.WriteString("\n")
+			}
+		}
+
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+		pane = lipgloss.JoinHorizontal(lipgloss.Top, pane, scrollbarStyle.Render(sb.String()))
+	}
+
+	return pane + "\n"
+}
+
+func (m *AppModel) renderFullscreenPreviewPane() string {
 	rendered := ""
 	switch m.mode {
 	case FinderMode:
@@ -2413,43 +2547,8 @@ func (m *AppModel) renderFullscreenPreview() string {
 	if strings.TrimSpace(rendered) == "" {
 		rendered = "No strand selected."
 	}
-
-	previewLines := strings.Split(rendered, "\n")
-	visibleH := m.termHeight - 1
-	if visibleH < 1 {
-		visibleH = 1
-	}
-	maxScroll := len(previewLines) - visibleH
-	if maxScroll < 0 {
-		maxScroll = 0
-	}
-	scroll := m.fullscreenScrollValue()
-	if scroll > maxScroll {
-		scroll = maxScroll
-	}
-	if scroll < 0 {
-		scroll = 0
-	}
-	m.setFullscreenScroll(scroll)
-
-	visibleLines := clipLines(previewLines, scroll, visibleH)
-	// Constrain content width to the terminal to avoid overflow of wide code blocks.
-	for i := range visibleLines {
-		visibleLines[i] = ansi.Truncate(visibleLines[i], m.termWidth-1, "")
-	}
-	content := strings.Join(visibleLines, "\n")
-	if content == "" {
-		content = "No strand selected."
-	}
-
-	scrollbar := renderScrollbar(len(previewLines), scroll, visibleH, visibleH+4)
-	if scrollbar != "" {
-		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(visibleH)
-		content = lipgloss.JoinHorizontal(lipgloss.Top, content, scrollbarStyle.Render(scrollbar))
-	}
-
-	footer := instructionsStyle.Render("f/Esc/q: exit fullscreen  ↑↓/jk: scroll  Ctrl+U/D: page scroll")
-	return content + "\n" + footer + "\n"
+	rawLines := strings.Split(rendered, "\n")
+	return m.renderFullscreenBorderedPane(rawLines, m.fullscreenScrollValue, m.setFullscreenScroll)
 }
 
 func (m *AppModel) renderFullFilePreview() string {
@@ -2470,22 +2569,22 @@ func (m *AppModel) renderFullFilePreview() string {
 		content = "Error: Could not load file content"
 	}
 
-	lines := strings.Split(content, "\n")
-	var visibleH int
-	var footer string
+	// When in fullscreen mode the header/footer are rendered by View();
+	// only the bordered content pane is returned here.
 	if m.fullscreenActive {
-		visibleH = m.termHeight - 1
-		if visibleH < 1 {
-			visibleH = 1
-		}
-		footer = instructionsStyle.Render("f: exit fullscreen  Esc/q: exit all  ↑↓/jk: scroll  Ctrl+U/D: page scroll")
-	} else {
-		visibleH = m.termHeight - 2
-		if visibleH < 1 {
-			visibleH = 1
-		}
-		footer = instructionsStyle.Render("F/Esc/q: exit  ↑↓/jk: scroll  Ctrl+U/D: page scroll")
+		lines := strings.Split(content, "\n")
+		getScroll := func() int { return m.fullFilePreviewScroll }
+		setScroll := func(v int) { m.fullFilePreviewScroll = v }
+		return m.renderFullscreenBorderedPane(lines, getScroll, setScroll)
 	}
+
+	// Non-fullscreen full file preview (standalone view with its own header/footer).
+	lines := strings.Split(content, "\n")
+	visibleH := m.termHeight - 2
+	if visibleH < 1 {
+		visibleH = 1
+	}
+	footer := instructionsStyle.Render("F/Esc/q: exit  ↑↓/jk: scroll  Ctrl+U/D: page scroll")
 
 	maxScroll := len(lines) - visibleH
 	if maxScroll < 0 {
@@ -2516,9 +2615,6 @@ func (m *AppModel) renderFullFilePreview() string {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, body, scrollbarStyle.Render(scrollbar))
 	}
 
-	if m.fullscreenActive {
-		return body + "\n" + footer + "\n"
-	}
 	header := titleStyle.Render("Full File: " + headerPath)
 	return header + "\n" + body + "\n" + footer + "\n"
 }
@@ -3110,10 +3206,10 @@ func (m *AppModel) renderWithFloatingPane(baseView string) string {
 
 	renderedContent := floatingPaneStyle.Render(contentStr)
 	contentLines := strings.Split(renderedContent, "\n")
-	
+
 	for len(contentLines) < floatingHeight {
 		emptyLine := lipgloss.NewStyle().
-			Width(floatingWidth-2).
+			Width(floatingWidth - 2).
 			Background(lipgloss.Color("#1E1E1E")).
 			Render(" ")
 		contentLines = append(contentLines, emptyLine)
