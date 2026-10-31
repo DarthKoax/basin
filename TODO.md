@@ -31,6 +31,7 @@
 - [ ] Animated transitions between modes (subtle fade/slide)
 - [ ] Color-code strands by tag or directory
 - [ ] Preview pane: syntax highlighting for more languages (auto-detect from code block)
+- [x] Fullscreen preview mode (`f` key) and full file preview mode (`F` key) - PR #5
 
 ### Navigation & Workflow
 - [x] Keyboard shortcuts cheat sheet: `?` or `Ctrl+/` opens overlay
