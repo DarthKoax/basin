@@ -2536,7 +2536,7 @@ func (m *AppModel) renderFullscreenBorderedPane(rawLines []string, getScroll fun
 			}
 		}
 
-		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 		pane = lipgloss.JoinHorizontal(lipgloss.Top, pane, scrollbarStyle.Render(sb.String()))
 	}
 
@@ -2630,7 +2630,7 @@ func (m *AppModel) renderFullFilePreview() string {
 
 	scrollbar := renderScrollbar(len(lines), scroll, visibleH, visibleH+4)
 	if scrollbar != "" {
-		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(visibleH)
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Height(visibleH)
 		body = lipgloss.JoinHorizontal(lipgloss.Top, body, scrollbarStyle.Render(scrollbar))
 	}
 
@@ -2790,7 +2790,7 @@ func (m *AppModel) renderMainPanels() string {
 		listContent = "  No matches found."
 	}
 
-	leftScrollbar := renderScrollbar(len(listLines), m.finderScrollOffset, innerH, innerH)
+	leftScrollbar := renderScrollbar(len(listLines), m.finderScrollOffset, innerH, panelHeight)
 
 	previewContent := "No strand selected."
 	var previewScrollbar string
@@ -2810,7 +2810,7 @@ func (m *AppModel) renderMainPanels() string {
 
 		visiblePreviewLines := clipLines(previewLines, m.finderPreviewScroll, innerH)
 		previewContent = strings.Join(visiblePreviewLines, "\n")
-		previewScrollbar = renderScrollbar(len(previewLines), m.finderPreviewScroll, innerH, innerH)
+		previewScrollbar = renderScrollbar(len(previewLines), m.finderPreviewScroll, innerH, panelHeight)
 	}
 
 	leftStyle := previewBorder
@@ -2833,11 +2833,11 @@ func (m *AppModel) renderMainPanels() string {
 	rightBox := rightPaneStyle.Render(previewContent)
 
 	if leftScrollbar != "" {
-		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(paneH)
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Height(paneH)
 		leftBox = lipgloss.JoinHorizontal(lipgloss.Top, leftBox, scrollbarStyle.Render(leftScrollbar))
 	}
 	if previewScrollbar != "" {
-		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(paneH)
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Height(paneH)
 		rightBox = lipgloss.JoinHorizontal(lipgloss.Top, rightBox, scrollbarStyle.Render(previewScrollbar))
 	}
 
@@ -2879,7 +2879,7 @@ func (m *AppModel) renderBrowserPanels() string {
 		listContent = "  Empty directory."
 	}
 
-	leftScrollbar := renderScrollbar(len(listLines), m.browserScrollOffset, innerH, innerH)
+	leftScrollbar := renderScrollbar(len(listLines), m.browserScrollOffset, innerH, panelHeight)
 
 	previewContent := "No strand selected."
 	var previewScrollbar string
@@ -2899,7 +2899,7 @@ func (m *AppModel) renderBrowserPanels() string {
 
 			visiblePreviewLines := clipLines(previewLines, m.browserPreviewScroll, innerH)
 			previewContent = strings.Join(visiblePreviewLines, "\n")
-			previewScrollbar = renderScrollbar(len(previewLines), m.browserPreviewScroll, innerH, innerH)
+			previewScrollbar = renderScrollbar(len(previewLines), m.browserPreviewScroll, innerH, panelHeight)
 		}
 	}
 
@@ -2921,11 +2921,11 @@ func (m *AppModel) renderBrowserPanels() string {
 	rightBox := rightPaneStyle.Render(previewContent)
 
 	if leftScrollbar != "" {
-		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(paneH)
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Height(paneH)
 		leftBox = lipgloss.JoinHorizontal(lipgloss.Top, leftBox, scrollbarStyle.Render(leftScrollbar))
 	}
 	if previewScrollbar != "" {
-		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(paneH)
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Height(paneH)
 		rightBox = lipgloss.JoinHorizontal(lipgloss.Top, rightBox, scrollbarStyle.Render(previewScrollbar))
 	}
 
@@ -2960,7 +2960,7 @@ func (m *AppModel) renderTagsPanels() string {
 			listContent = "  No strands in tag."
 		}
 
-		listScrollbar = renderScrollbar(len(listLines), m.tagSnippetsScrollOffset, innerH, innerH)
+		listScrollbar = renderScrollbar(len(listLines), m.tagSnippetsScrollOffset, innerH, panelHeight)
 
 		previewContent = "No strand selected."
 		if len(m.tagSnippets) > 0 && m.tagSnippetsSelectedIndex < len(m.tagSnippets) {
@@ -2977,7 +2977,7 @@ func (m *AppModel) renderTagsPanels() string {
 
 			visiblePreviewLines := clipLines(previewLines, m.tagSnippetsPreviewScroll, innerH)
 			previewContent = strings.Join(visiblePreviewLines, "\n")
-			previewScrollbar = renderScrollbar(len(previewLines), m.tagSnippetsPreviewScroll, innerH, innerH)
+			previewScrollbar = renderScrollbar(len(previewLines), m.tagSnippetsPreviewScroll, innerH, panelHeight)
 		}
 	} else {
 		for i, tag := range m.tags {
@@ -2996,7 +2996,7 @@ func (m *AppModel) renderTagsPanels() string {
 			listContent = "  No tags found."
 		}
 
-		listScrollbar = renderScrollbar(len(listLines), m.tagsScrollOffset, innerH, innerH)
+		listScrollbar = renderScrollbar(len(listLines), m.tagsScrollOffset, innerH, panelHeight)
 
 		previewContent = "Select a tag to see strands."
 		if len(m.tags) > 0 && m.tagsSelectedIndex < len(m.tags) {
@@ -3016,7 +3016,7 @@ func (m *AppModel) renderTagsPanels() string {
 
 			visiblePreviewLines := clipLines(previewLines, m.tagsPreviewScroll, innerH)
 			previewContent = strings.Join(visiblePreviewLines, "\n")
-			previewScrollbar = renderScrollbar(len(previewLines), m.tagsPreviewScroll, innerH, innerH)
+			previewScrollbar = renderScrollbar(len(previewLines), m.tagsPreviewScroll, innerH, panelHeight)
 		}
 	}
 
@@ -3046,11 +3046,11 @@ func (m *AppModel) renderTagsPanels() string {
 	rightBox := rightPaneStyle.Render(previewContent)
 
 	if listScrollbar != "" {
-		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(paneH)
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Height(paneH)
 		leftBox = lipgloss.JoinHorizontal(lipgloss.Top, leftBox, scrollbarStyle.Render(listScrollbar))
 	}
 	if previewScrollbar != "" {
-		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Height(paneH)
+		scrollbarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Height(paneH)
 		rightBox = lipgloss.JoinHorizontal(lipgloss.Top, rightBox, scrollbarStyle.Render(previewScrollbar))
 	}
 
