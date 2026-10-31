@@ -1920,6 +1920,25 @@ func (m *AppModel) renderHeader() string {
 
 	sb.WriteString(titleStyle.Render("BASIN") + " ")
 
+	// In fullscreen mode, show a simplified header without the search input
+	if m.fullscreenActive {
+		switch m.mode {
+		case FinderMode:
+			sb.WriteString(titleStyle.Render("Fuzzyfinder (Fullscreen)") + "\n")
+		case BrowserMode:
+			sb.WriteString(titleStyle.Render(fmt.Sprintf("Browser: /%s (Fullscreen)", m.browserPath)) + "\n")
+		case TagsMode:
+			if m.inTagSnippets {
+				sb.WriteString(titleStyle.Render(fmt.Sprintf("Tag: %s (Fullscreen)", m.selectedTag)) + "\n")
+			} else {
+				sb.WriteString(titleStyle.Render("Tags (Fullscreen)") + "\n")
+			}
+		default:
+			sb.WriteString(titleStyle.Render("Fullscreen") + "\n")
+		}
+		return sb.String()
+	}
+
 	switch m.mode {
 	case FinderMode:
 		sb.WriteString(titleStyle.Render("Fuzzyfinder") + "\n")
@@ -3055,6 +3074,11 @@ func (m *AppModel) renderTagsPanels() string {
 }
 
 func (m *AppModel) headerHeight() int {
+	// In fullscreen mode, use a simplified header that's only 2 lines
+	if m.fullscreenActive {
+		return 2
+	}
+	
 	switch m.mode {
 	case FinderMode, WizardMode:
 		return 4
