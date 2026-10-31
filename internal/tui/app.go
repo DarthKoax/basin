@@ -139,8 +139,8 @@ type AppModel struct {
 	mouseDragging bool
 	mouseDownRow  int
 
-	clipboardErr    error
-	clipboardWarn   string
+	clipboardErr  error
+	clipboardWarn string
 
 	filenamePromptActive bool
 	filenamePromptInput  textinput.Model
@@ -534,7 +534,7 @@ func (m *AppModel) setupWizardForCurrentVar() tea.Cmd {
 	r := resolver.NewResolver(m.config, m.wizardSnippet, fm)
 
 	defVal := r.GetDefaultValue(p)
-	
+
 	if m.history != nil {
 		lastUsed := m.history.GetLastUsedValues(m.wizardSnippet.ID)
 		if lastUsed != nil {
@@ -543,7 +543,7 @@ func (m *AppModel) setupWizardForCurrentVar() tea.Cmd {
 			}
 		}
 	}
-	
+
 	m.wizardInput.SetValue(defVal)
 	m.wizardInput.Placeholder = fmt.Sprintf("Value for %s...", p.Name)
 	m.wizardInput.Width = 30
@@ -578,14 +578,14 @@ func (m *AppModel) setupWizardForCurrentVar() tea.Cmd {
 func (m *AppModel) finalizeSnippet(body string) tea.Cmd {
 	m.Done = true
 	m.FinalSnippet = body
-	
+
 	if m.history != nil {
 		m.history.RecordUsage(m.wizardSnippet.ID, m.wizardConfirmed)
 		if err := m.history.Save(); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to save history: %v\n", err)
 		}
 	}
-	
+
 	if m.config.Output.Clipboard {
 		if err := clipboard.WriteAll(body); err != nil {
 			m.clipboardErr = fmt.Errorf("clipboard copy failed: %w", err)
@@ -2196,7 +2196,7 @@ func (m *AppModel) renderMainPanels() string {
 		listContent = "  No matches found."
 	}
 
-	leftScrollbar := renderScrollbar(len(listLines), m.finderScrollOffset, innerH, innerH)
+	leftScrollbar := renderScrollbar(len(listLines), m.finderScrollOffset, innerH, panelHeight)
 
 	previewContent := "No strand selected."
 	var previewScrollbar string
@@ -2216,7 +2216,7 @@ func (m *AppModel) renderMainPanels() string {
 
 		visiblePreviewLines := clipLines(previewLines, m.finderPreviewScroll, innerH)
 		previewContent = strings.Join(visiblePreviewLines, "\n")
-		previewScrollbar = renderScrollbar(len(previewLines), m.finderPreviewScroll, innerH, innerH)
+		previewScrollbar = renderScrollbar(len(previewLines), m.finderPreviewScroll, innerH, panelHeight)
 	}
 
 	leftStyle := previewBorder
@@ -2290,7 +2290,7 @@ func (m *AppModel) renderBrowserPanels() string {
 		listContent = "  Empty directory."
 	}
 
-	leftScrollbar := renderScrollbar(len(listLines), m.browserScrollOffset, innerH, innerH)
+	leftScrollbar := renderScrollbar(len(listLines), m.browserScrollOffset, innerH, panelHeight)
 
 	previewContent := "No strand selected."
 	var previewScrollbar string
@@ -2310,7 +2310,7 @@ func (m *AppModel) renderBrowserPanels() string {
 
 			visiblePreviewLines := clipLines(previewLines, m.browserPreviewScroll, innerH)
 			previewContent = strings.Join(visiblePreviewLines, "\n")
-			previewScrollbar = renderScrollbar(len(previewLines), m.browserPreviewScroll, innerH, innerH)
+			previewScrollbar = renderScrollbar(len(previewLines), m.browserPreviewScroll, innerH, panelHeight)
 		}
 	}
 
@@ -2376,7 +2376,7 @@ func (m *AppModel) renderTagsPanels() string {
 			listContent = "  No strands in tag."
 		}
 
-		listScrollbar = renderScrollbar(len(listLines), m.tagSnippetsScrollOffset, innerH, innerH)
+		listScrollbar = renderScrollbar(len(listLines), m.tagSnippetsScrollOffset, innerH, panelHeight)
 
 		previewContent = "No strand selected."
 		if len(m.tagSnippets) > 0 && m.tagSnippetsSelectedIndex < len(m.tagSnippets) {
@@ -2393,7 +2393,7 @@ func (m *AppModel) renderTagsPanels() string {
 
 			visiblePreviewLines := clipLines(previewLines, m.tagSnippetsPreviewScroll, innerH)
 			previewContent = strings.Join(visiblePreviewLines, "\n")
-			previewScrollbar = renderScrollbar(len(previewLines), m.tagSnippetsPreviewScroll, innerH, innerH)
+			previewScrollbar = renderScrollbar(len(previewLines), m.tagSnippetsPreviewScroll, innerH, panelHeight)
 		}
 	} else {
 		for i, tag := range m.tags {
@@ -2412,7 +2412,7 @@ func (m *AppModel) renderTagsPanels() string {
 			listContent = "  No tags found."
 		}
 
-		listScrollbar = renderScrollbar(len(listLines), m.tagsScrollOffset, innerH, innerH)
+		listScrollbar = renderScrollbar(len(listLines), m.tagsScrollOffset, innerH, panelHeight)
 
 		previewContent = "Select a tag to see strands."
 		if len(m.tags) > 0 && m.tagsSelectedIndex < len(m.tags) {
@@ -2432,7 +2432,7 @@ func (m *AppModel) renderTagsPanels() string {
 
 			visiblePreviewLines := clipLines(previewLines, m.tagsPreviewScroll, innerH)
 			previewContent = strings.Join(visiblePreviewLines, "\n")
-			previewScrollbar = renderScrollbar(len(previewLines), m.tagsPreviewScroll, innerH, innerH)
+			previewScrollbar = renderScrollbar(len(previewLines), m.tagsPreviewScroll, innerH, panelHeight)
 		}
 	}
 
@@ -2631,10 +2631,10 @@ func (m *AppModel) renderWithFloatingPane(baseView string) string {
 
 	renderedContent := floatingPaneStyle.Render(contentStr)
 	contentLines := strings.Split(renderedContent, "\n")
-	
+
 	for len(contentLines) < floatingHeight {
 		emptyLine := lipgloss.NewStyle().
-			Width(floatingWidth-2).
+			Width(floatingWidth - 2).
 			Background(lipgloss.Color("#1E1E1E")).
 			Render(" ")
 		contentLines = append(contentLines, emptyLine)
