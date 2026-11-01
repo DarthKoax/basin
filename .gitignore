@@ -1,2 +1,6 @@
 /basin
 /main
+factory/jobs/
+factory/board.json
+factory/.board.lock
+factory/
