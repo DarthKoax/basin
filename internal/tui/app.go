@@ -1773,6 +1773,53 @@ func clipLines(lines []string, offset, maxLines int) []string {
 	return lines[offset:end]
 }
 
+// wrapLines wraps each line to fit within the specified width, breaking at word boundaries.
+// Returns a new slice with wrapped lines.
+func wrapLines(lines []string, width int) []string {
+	if width <= 0 {
+		return lines
+	}
+	
+	var wrappedLines []string
+	for _, line := range lines {
+		if ansi.StringWidth(line) <= width {
+			wrappedLines = append(wrappedLines, line)
+			continue
+		}
+		
+		// Line needs wrapping
+		words := strings.Fields(line)
+		currentLine := ""
+		currentWidth := 0
+		
+		for _, word := range words {
+			wordWidth := ansi.StringWidth(word)
+			
+			// If adding this word would exceed width, wrap to next line
+			if currentWidth > 0 && currentWidth+1+wordWidth > width {
+				wrappedLines = append(wrappedLines, currentLine)
+				currentLine = word
+				currentWidth = wordWidth
+			} else {
+				// Add word to current line
+				if currentWidth > 0 {
+					currentLine += " "
+					currentWidth += 1
+				}
+				currentLine += word
+				currentWidth += wordWidth
+			}
+		}
+		
+		// Add the last line if not empty
+		if currentLine != "" {
+			wrappedLines = append(wrappedLines, currentLine)
+		}
+	}
+	
+	return wrappedLines
+}
+
 func renderScrollbar(totalLines, scrollOffset, visibleHeight, panelHeight int) string {
 	if totalLines <= visibleHeight {
 		return ""
@@ -2473,7 +2520,9 @@ func (m *AppModel) fullscreenPaneDims() (paneW, paneH, contentW, contentH int) {
 func (m *AppModel) renderFullscreenBorderedPane(rawLines []string, getScroll func() int, setScroll func(int)) string {
 	paneW, paneH, contentW, contentH := m.fullscreenPaneDims()
 
-	totalLines := len(rawLines)
+	// Wrap long lines instead of truncating them
+	wrappedLines := wrapLines(rawLines, contentW)
+	totalLines := len(wrappedLines)
 	maxScroll := totalLines - contentH
 	if maxScroll < 0 {
 		maxScroll = 0
@@ -2487,10 +2536,7 @@ func (m *AppModel) renderFullscreenBorderedPane(rawLines []string, getScroll fun
 	}
 	setScroll(scroll)
 
-	visibleLines := clipLines(rawLines, scroll, contentH)
-	for i := range visibleLines {
-		visibleLines[i] = ansi.Truncate(visibleLines[i], contentW, "")
-	}
+	visibleLines := clipLines(wrappedLines, scroll, contentH)
 	body := strings.Join(visibleLines, "\n")
 	if body == "" {
 		body = " "
