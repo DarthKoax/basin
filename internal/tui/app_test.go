@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -726,7 +727,7 @@ func TestHelpOverlay_FinderMode(t *testing.T) {
 	if len(bindings) == 0 {
 		t.Fatal("expected bindings to be non-empty")
 	}
-	
+
 	foundCtrlP := false
 	for _, b := range bindings {
 		if b[0] == "Ctrl+P" {
@@ -755,7 +756,7 @@ func TestHelpOverlay_WizardMode(t *testing.T) {
 	if len(bindings) == 0 {
 		t.Fatal("expected bindings to be non-empty")
 	}
-	
+
 	foundTab := false
 	foundEsc := false
 	for _, b := range bindings {
@@ -833,5 +834,163 @@ func TestHelpOverlay_Keybinding(t *testing.T) {
 
 	if len(m.floatingPane.content) == 0 {
 		t.Fatal("expected floating pane content to be non-empty")
+	}
+}
+
+// TestFinderModeScrollbarVisible verifies scrollbar appears in Finder mode when content exceeds visible area.
+func TestFinderModeScrollbarVisible(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snippets := make([]domain.Snippet, 50)
+	for i := 0; i < 50; i++ {
+		snippets[i] = domain.Snippet{
+			Name:         fmt.Sprintf("snippet-%d", i),
+			RelativePath: "test.md",
+			Body:         "echo test",
+			Language:     "sh",
+		}
+	}
+	m := NewAppModel(cfg, nil, snippets, nil)
+	m.termWidth = 120
+	m.termHeight = 40
+	m.mode = FinderMode
+	m.finderFocusedPanel = 0
+
+	view := stripANSI(m.View())
+	scrollbarChars := strings.Count(view, "█") + strings.Count(view, "░")
+	if scrollbarChars < 30 {
+		t.Fatal("expected scrollbar characters in Finder mode view")
+	}
+}
+
+// TestFinderModePreviewScrollbarVisible verifies scrollbar appears in preview panel.
+func TestFinderModePreviewScrollbarVisible(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snip := domain.Snippet{
+		Name:         "big-snippet",
+		RelativePath: "test.md",
+		Body:         strings.Repeat("line\n", 60),
+		Language:     "sh",
+	}
+	m := NewAppModel(cfg, nil, []domain.Snippet{snip}, nil)
+	m.termWidth = 120
+	m.termHeight = 40
+	m.mode = FinderMode
+	m.finderFocusedPanel = 1
+	m.finderSelectedIndex = 0
+
+	view := stripANSI(m.View())
+	scrollbarChars := strings.Count(view, "█") + strings.Count(view, "░")
+	if scrollbarChars < 30 {
+		t.Fatal("expected scrollbar characters in Finder preview")
+	}
+}
+
+// TestBrowserModeScrollbarVisible verifies scrollbar appears in Browser mode.
+func TestBrowserModeScrollbarVisible(t *testing.T) {
+	cfg := config.DefaultConfig()
+	files := make([]domain.SnippetFile, 50)
+	for i := 0; i < 50; i++ {
+		files[i] = domain.SnippetFile{
+			RelativePath: fmt.Sprintf("file-%d.md", i),
+			Snippets: []domain.Snippet{
+				{Name: fmt.Sprintf("snip-%d", i), Body: "echo test", Language: "sh"},
+			},
+		}
+	}
+	m := NewAppModel(cfg, nil, nil, files)
+	m.termWidth = 120
+	m.termHeight = 40
+	m.mode = BrowserMode
+
+	view := stripANSI(m.View())
+	scrollbarChars := strings.Count(view, "█") + strings.Count(view, "░")
+	if scrollbarChars < 30 {
+		t.Fatal("expected scrollbar characters in Browser mode view")
+	}
+}
+
+// TestTagsModeScrollbarVisible verifies scrollbar appears in Tags mode.
+func TestTagsModeScrollbarVisible(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snippets := make([]domain.Snippet, 50)
+	for i := 0; i < 50; i++ {
+		snippets[i] = domain.Snippet{
+			Name:         fmt.Sprintf("snippet-%d", i),
+			RelativePath: "test.md",
+			Body:         "echo test",
+			Language:     "sh",
+			Tags:         []string{fmt.Sprintf("tag-%d", i)},
+		}
+	}
+	m := NewAppModel(cfg, nil, snippets, nil)
+	m.termWidth = 120
+	m.termHeight = 40
+	m.mode = TagsMode
+
+	view := stripANSI(m.View())
+	scrollbarChars := strings.Count(view, "█") + strings.Count(view, "░")
+	if scrollbarChars < 30 {
+		t.Fatal("expected scrollbar characters in Tags mode view")
+	}
+}
+
+// TestScrollbarPositionUpdates verifies thumb moves when scroll offset changes.
+func TestScrollbarPositionUpdates(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snippets := make([]domain.Snippet, 50)
+	for i := 0; i < 50; i++ {
+		snippets[i] = domain.Snippet{
+			Name:         fmt.Sprintf("snippet-%d", i),
+			RelativePath: "test.md",
+			Body:         "echo test",
+			Language:     "sh",
+		}
+	}
+	m := NewAppModel(cfg, nil, snippets, nil)
+	m.termWidth = 120
+	m.termHeight = 40
+	m.mode = FinderMode
+	m.finderFocusedPanel = 0
+
+	view1 := stripANSI(m.View())
+	m.finderScrollOffset = 10
+	view2 := stripANSI(m.View())
+
+	if !strings.Contains(view1, "█") || !strings.Contains(view2, "█") {
+		t.Fatal("expected scrollbar in both views")
+	}
+	// The rendered output should differ when scroll offset changes.
+	if view1 == view2 {
+		t.Fatal("expected view to change when scroll offset changes")
+	}
+}
+
+// TestScrollbarAlignment verifies scrollbar chars present and borders present.
+func TestScrollbarAlignment(t *testing.T) {
+	cfg := config.DefaultConfig()
+	snippets := make([]domain.Snippet, 50)
+	for i := 0; i < 50; i++ {
+		snippets[i] = domain.Snippet{
+			Name:         fmt.Sprintf("snippet-%d", i),
+			RelativePath: "test.md",
+			Body:         "echo test",
+			Language:     "sh",
+		}
+	}
+	m := NewAppModel(cfg, nil, snippets, nil)
+	m.termWidth = 120
+	m.termHeight = 40
+	m.mode = FinderMode
+	m.finderFocusedPanel = 0
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "█") {
+		t.Fatal("expected thumb character")
+	}
+	if !strings.Contains(view, "░") {
+		t.Fatal("expected track character")
+	}
+	if !strings.Contains(view, "┌") || !strings.Contains(view, "└") {
+		t.Fatal("expected pane borders")
 	}
 }
